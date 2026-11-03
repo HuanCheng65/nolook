@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from . import tree
 from .config import find_config
@@ -63,6 +64,7 @@ def build() -> argparse.ArgumentParser:
     s = sub.add_parser("snap", help="list what is on screen, with refs")
     s.add_argument("--all", action="store_true", help=f"no {SNAP_CAP}-line cap")
     s.add_argument("--in", dest="within", metavar="Q", help="only this element and what is inside it")
+    s.add_argument("--json", action="store_true", help="one JSON object per element, for scripts")
 
     s = sub.add_parser("tap", help="tap one element")
     s.add_argument("query", nargs="?")
@@ -122,6 +124,7 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("args", nargs=argparse.REMAINDER)
 
     sub.add_parser("flows", help="list the project's flows")
+    sub.add_parser("doctor", help="check adb, the device, ffmpeg and Perfetto, and say what to fix")
 
     s = sub.add_parser("trace", help="summarise a Perfetto trace (no device needed)")
     ts = s.add_subparsers(dest="trace_cmd", required=True)
@@ -136,7 +139,7 @@ def build() -> argparse.ArgumentParser:
 
     s = sub.add_parser("topng", help=argparse.SUPPRESS)  # for the Claude Code pane: it draws PNGs only
     s.add_argument("src")
-    s.add_argument("dst")
+    s.add_argument("dst", nargs="?", help="default: beside src, as .png")
     s.add_argument("--width", type=int)
 
     s = sub.add_parser("motion", help="record an animation and report its timing, curve and stalls")
@@ -199,8 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         img = Image.open(a.src)
         if a.width and img.width > a.width:
             img = img.resize((a.width, round(img.height * a.width / img.width)))
-        img.save(a.dst, "PNG")
+        dst = a.dst or str(Path(a.src).with_suffix(".pane.png"))
+        img.save(dst, "PNG")
+        print(dst)
         return 0
+
+    if a.cmd == "doctor":
+        from . import doctor
+
+        return doctor.run(cfg)
 
     if a.cmd == "trace":
         from . import tracing
@@ -250,6 +260,16 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
             box = tree.resolve(ns, a.within)
             i = ns.index(box)
             ns = ns[i : box.end]
+        if a.json:
+            import json
+
+            for n in ns:
+                print(json.dumps({
+                    "ref": n.ref, "role": n.role, "label": n.label, "text": n.text, "desc": n.desc, "id": n.rid,
+                    "bounds": list(n.bounds), "center": list(n.center), "depth": n.depth, "covered": n.covered,
+                    **{k: v for k, v in n.flags.items()},
+                }, ensure_ascii=False))
+            return 0
         pkgs = sorted({n.pkg for n in ns if n.pkg})
         print(f"{' + '.join(pkgs) or '(empty)'} · {d.size[0]}x{d.size[1]} · {len(ns)} elements")
         print_nodes(ns, cap=None if a.all else SNAP_CAP)

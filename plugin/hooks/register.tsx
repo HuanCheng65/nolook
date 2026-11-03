@@ -25,9 +25,8 @@ let picture: { png: string; width: number; height: number } | null = null
 let refreshing = false
 let opened = false
 let ticker: { cancel: () => void } | null = null
-const tag = Math.random().toString(36).slice(2, 8)
-const mirrorPath = `/tmp/nolook-pane-${tag}.png`
-const picturePath = `/tmp/nolook-pane-${tag}-pic.png`
+// nolook picks where its files go (its cache directory) and prints the path.
+const lastPath = (stdout: string) => stdout.trim().split('\n').pop()?.split(/\s+/)[0] ?? ''
 
 async function clockText($: EngineInterface) {
   return new Date(await $.clock.now()).toTimeString().slice(0, 8)
@@ -67,9 +66,10 @@ async function refresh($: EngineInterface) {
     // The device this session's agent drove last: its commands may pick one by
     // a config or env var this process never sees.
     const session = await $.session.id()
-    const ran = await $.process.run(['nolook', '--session', session, 'shot', '--png', '--width', '360', '-o', mirrorPath], { timeoutMs: 15000 })
-    if (ran.exitCode === 0) {
-      mirror = { ...(await pngSize($, mirrorPath)), at: await clockText($) }
+    const ran = await $.process.run(['nolook', '--session', session, 'shot', '--png', '--width', '360'], { timeoutMs: 15000 })
+    const path = lastPath(ran.stdout)
+    if (ran.exitCode === 0 && path) {
+      mirror = { ...(await pngSize($, path)), at: await clockText($) }
       await update($, gen, n => n + 1)
     }
   } catch {
@@ -80,9 +80,10 @@ async function refresh($: EngineInterface) {
 }
 
 async function showPicture($: EngineInterface, path: string) {
-  const ran = await $.process.run(['nolook', 'topng', path, picturePath, '--width', '900'], { timeoutMs: 15000 })
-  if (ran.exitCode !== 0) return
-  picture = await pngSize($, picturePath)
+  const ran = await $.process.run(['nolook', 'topng', path, '--width', '900'], { timeoutMs: 15000 })
+  const png = lastPath(ran.stdout)
+  if (ran.exitCode !== 0 || !png) return
+  picture = await pngSize($, png)
   await update($, picLabel, () => path.split('/').pop() ?? '')
   await update($, gen, n => n + 1)
 }
@@ -146,7 +147,7 @@ export const register: Register = on => {
     }
     const pics = [...text.matchAll(PICTURE)].map(x => x[1] ?? '').filter(x => x)
     const sheet = pics.find(p => p.endsWith('-motion.jpg')) ?? pics[pics.length - 1]
-    if (sheet && !sheet.startsWith('/tmp/nolook-pane-')) void showPicture($, sheet)
+    if (sheet && !sheet.endsWith('.pane.png')) void showPicture($, sheet)
     // Read-only commands change nothing worth a new frame.
     if (!['flows', 'topng', 'get', 'log', 'motion-compare'].includes(m[2] ?? '')) void refresh($)
     return ran

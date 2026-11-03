@@ -1,6 +1,6 @@
 ---
 name: nolook
-description: Drive an Android app on a device or emulator through its UI tree instead of screenshots — list what is on screen, tap by text or id, type, scroll, wait, run multi-step Python flows, and take small cropped screenshots only when a visual check needs one. Use whenever you need to operate, check or debug an app on a connected Android device.
+description: Drive and inspect an Android app on a device or emulator through its UI tree instead of screenshots — see what is on screen, tap by text or id, type, scroll, wait, run multi-step Python flows, take small cropped screenshots for visual checks, measure animations and frame timing. Use whenever a task involves a connected Android device or emulator — operating the app, checking or describing what a screen shows or how it looks, verifying a change, debugging, or performance — and before reaching for adb screencap, input tap or uiautomator dump.
 ---
 
 # nolook
@@ -19,15 +19,15 @@ few hundred tokens.
 
 ```
 nolook snap                 # what is on screen, one element per line
-nolook tap 发送              # act; prints what changed
-nolook wait 发送成功          # when the result takes time
+nolook tap Save             # act; prints what changed
+nolook wait Saved           # when the result takes time
 ```
 
 A `snap` line looks like:
 
 ```
-@e12  btn    "回复楼主" #reply_button (540,2210)
-  @e30  btn    "标题 · 3 回复" [covered] (540,2221)
+@e12  btn    "New note" #fab_new (960,2180)
+  @e30  btn    "Groceries · Milk, eggs" [covered] (540,2221)
 ```
 
 `@e12` is a ref. It names that element until it leaves the screen; using it
@@ -46,11 +46,14 @@ full list.
 | Query | Matches |
 |---|---|
 | `@e12` | a ref from the last output |
-| `#reply_button` | resource id or Compose test tag |
-| `回复` | text, description, or one part of a row's label, exactly |
-| `~回复` | label contains |
-| `/^第\d+楼$/` | label regex |
-| `btn:回复` | any of the above, limited to a role: btn input text img scroll check switch |
+| `#fab_new` | resource id or Compose test tag |
+| `Save` | text, description, or one part of a row's label, exactly |
+| `~Sav` | label contains |
+| `/^Item \d+$/` | label regex |
+| `btn:Save` | any of the above, limited to a role: btn input text img scroll check switch |
+
+Labels are matched as the app shows them, in any language: `tap 保存`
+works the same way.
 
 A query that matches nothing lists the closest elements; one that matches
 several lists them. Pick a ref, add a role, or pass `--nth N`. Never fall back
@@ -62,7 +65,7 @@ WebViews the tree cannot see.
 ```
 nolook snap [--all] [--in Q]            list elements (80 lines unless --all)
 nolook get Q                            one element in full: text, id, bounds, flags
-nolook tap Q [--nth N] [--long]         tap; --force only when tapping what covers it is intended
+nolook tap Q [--nth N] [--long]         tap (see Safety for --confirm and --force)
 nolook type TEXT [--into Q] [--append] [--enter]
 nolook key back|home|enter|…            nolook back for short
 nolook scroll [down|up|left|right] [--in Q] [--until Q]
@@ -83,14 +86,14 @@ When you know the next steps, put them in one flow instead of one command per
 turn. Branches and loops are plain Python; `d` is the device:
 
 ```python
-"""Reply bar shows the risk notice on first use."""
-d.open("oolong://thread/123")
-d.wait("回复")
-d.tap("#reply_button")
-if d.exists("我知道了"):
-    d.tap("我知道了")
-d.check(d.exists("#composer_input"), "composer opened")
-d.shot("#composer")
+"""Opening a note shows the editor, with or without a saved draft."""
+d.open("notes://note/42")
+d.wait("Groceries")
+d.tap("#edit")
+if d.exists("Discard draft?"):
+    d.tap("Keep")
+d.check(d.exists("#body"), "editor open")
+d.shot("#toolbar")
 ```
 
 `nolook run path/to/flow.py`. Each step prints one line. On failure it prints
@@ -121,9 +124,9 @@ where to tap.
 You can't watch a video; `nolook motion` measures one for you.
 
 ```
-nolook motion --tap "#reply_button" --label open     # record, tap, measure
+nolook motion --tap "#fab_new" --label open          # record, tap, measure
 nolook motion --key back --label close
-nolook motion --after "发送成功" --for 2               # record until a state shows, then measure
+nolook motion --after "Saved" --for 2                 # record until a state shows, then measure
 nolook motion --el "#sheet" --tap … --slow 4           # measure one element; animations 4× slower
 nolook motion-compare                                  # recorded runs side by side
 ```
@@ -174,20 +177,36 @@ labelled runs.
 
 The app may be logged in to a real account. Taps are by query, so they hit
 what you meant or fail; still, read what an action changed before the next
-one. If the project lists `guard` patterns in `.nolook.toml`, any matching
-log line after an action (a like, a post) is printed as `⚠ guard:`. Stop and
-tell the user when you see one you did not intend.
+one.
+
+- A tap on a label that looks like a write action (like, follow, send, post,
+  delete, …; the project can set its own `danger` list) is refused. Pass
+  `--confirm` only when the user asked for that action. Never use it to get
+  past a refusal while testing something else.
+- A tap on a `[covered]` element is refused. Scroll it into view; pass
+  `--force` only when tapping what covers it is the point.
+- If the project lists `guard` patterns, any matching log line after an
+  action (a like, a post) is printed as `⚠ guard:`. Stop and tell the user
+  when you see one you did not intend.
+- Test what a query resolves to with `nolook get Q`, which does not act;
+  never with `tap`.
 
 ## Setup
+
+If `nolook` is not on PATH, it installs with `uv tool install nolook` (or
+`pipx install nolook`). `nolook doctor` checks adb, the device, ffmpeg and
+Perfetto, and says what to fix; run it first when something fails to
+connect.
 
 A `.nolook.toml` at the project root picks the device and app:
 
 ```toml
-serial = "emulator-5556"
-adb_port = 5038          # if the device is on a non-default adb server
-package = "com.example.app"
+serial = "emulator-5554"
+adb_port = 5037          # if the device is on a non-default adb server
+package = "com.example.notes"
 flows = "tools/flows"
-guard = ["opAgree", "add_post"]
+guard = ["/api/like", "/api/post"]
+danger = ["Like", "Send", "Delete"]
 ```
 
 Compose apps: set `Modifier.semantics { testTagsAsResourceId = true }` near

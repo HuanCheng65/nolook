@@ -2,13 +2,13 @@
 
 A flow is a Python file run with `d` (a Flow) and `args` in scope:
 
-    \"\"\"Open a thread and check the reply bar.\"\"\"
-    d.open("oolong://thread/123")
-    d.wait("回复")
-    if d.exists("我知道了"):
-        d.tap("我知道了")
-    d.tap("#reply_button")
-    d.shot("#composer")
+    \"\"\"Open a note and check the editor.\"\"\"
+    d.open("notes://note/42")
+    d.wait("Groceries")
+    if d.exists("Discard draft?"):
+        d.tap("Keep")
+    d.tap("#edit")
+    d.shot("#toolbar")
 
 Each step prints one line. On failure the flow stops and prints the step, the
 screen at that moment and a small screenshot's path.

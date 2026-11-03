@@ -1,11 +1,11 @@
 """Project settings from the nearest .nolook.toml, with env overrides.
 
-    serial = "emulator-5556"
-    adb_port = 5038
-    package = "oolong.client"
+    serial = "emulator-5554"
+    adb_port = 5037
+    package = "com.example.notes"
     flows = "tools/flows"
-    guard = ["opAgree", "add_post"]   # logcat regexes flagged after each action
-    danger = ["赞", "关注", "发送"]      # labels a tap refuses without --confirm
+    guard = ["/api/like", "/api/post"]   # logcat regexes flagged after each action
+    danger = ["Like", "Send", "Delete"]  # labels a tap refuses without --confirm
 """
 
 from __future__ import annotations
