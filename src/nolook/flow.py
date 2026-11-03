@@ -423,13 +423,13 @@ class Flow:
     @contextlib.contextmanager
     def slow(self, factor: float):
         """Animations `factor` times slower inside the block; restored after."""
-        old = self._d._shell(["settings", "get", "global", "animator_duration_scale"]).strip()
-        self._d._shell(["settings", "put", "global", "animator_duration_scale", str(factor)])
+        old = self._d.android.shell(["settings", "get", "global", "animator_duration_scale"]).strip()
+        self._d.android.shell(["settings", "put", "global", "animator_duration_scale", str(factor)])
         self._log(f"slow ×{factor:g}")
         try:
             yield
         finally:
-            self._d._shell(["settings", "put", "global", "animator_duration_scale", old if old not in ("", "null") else "1"])
+            self._d.android.shell(["settings", "put", "global", "animator_duration_scale", old if old not in ("", "null") else "1"])
 
     def compile(self, mode: str) -> str:
         """Set the ART compile mode (speed, verify, …) and stop the app; launch it again before measuring."""

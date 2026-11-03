@@ -301,15 +301,6 @@ class Device:
     def _device_time(self) -> str | None:
         return self.backend.log_mark() if self.cfg.guard else None
 
-    # Moving to `android`: perf and motion still call these.
-
-    @property
-    def u2(self):
-        return self.android.u2
-
-    def _shell(self, cmd: list[str], timeout: int = 60) -> str:
-        return self.android.shell(cmd, timeout)
-
 
 def _remember_device(serial: str) -> None:
     # Which device this Claude Code session drove last, so a pane can show the

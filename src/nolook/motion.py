@@ -64,18 +64,18 @@ def record(
 
     old_scale = None
     if slow:
-        old_scale = d._shell(["settings", "get", "global", "animator_duration_scale"]).strip()
-        d._shell(["settings", "put", "global", "animator_duration_scale", str(slow)])
+        old_scale = d.android.shell(["settings", "get", "global", "animator_duration_scale"]).strip()
+        d.android.shell(["settings", "put", "global", "animator_duration_scale", str(slow)])
     try:
         pkg = d.cfg.package
         if pkg:
-            d._shell(["dumpsys", "gfxinfo", pkg, "reset"])
+            d.android.shell(["dumpsys", "gfxinfo", pkg, "reset"])
         conn, t_start = _start_recording(d, seconds + 6)
         t_trigger = time.monotonic()
         if tap_node is not None:
-            d.u2.click(*tap_node.center)
+            d.backend.click(*tap_node.center)
         elif key is not None:
-            d.u2.press(key)
+            d.backend.press(key)
         elif after is not None:
             d.wait(after, timeout=seconds + 5)
         time.sleep(seconds)
@@ -90,7 +90,7 @@ def record(
                 gfx = {}
     finally:
         if old_scale is not None:
-            d._shell(["settings", "put", "global", "animator_duration_scale", old_scale if old_scale != "null" else "1"])
+            d.android.shell(["settings", "put", "global", "animator_duration_scale", old_scale if old_scale != "null" else "1"])
 
     if el is not None and target_box is None:
         # The element may only exist once the animation has run.
@@ -98,8 +98,8 @@ def record(
 
     work = Path(tempfile.mkdtemp(prefix="nolook-motion-"))
     video = work / "motion.mp4"
-    d.u2.pull(REMOTE, str(video))
-    d._shell(["rm", "-f", REMOTE])
+    d.android.pull(REMOTE, str(video))
+    d.android.shell(["rm", "-f", REMOTE])
 
     box = region or target_box or (0, 0, *d.size)
     frames = _extract(video, box, d.size, work)
@@ -128,13 +128,13 @@ def record(
 
 
 def _start_recording(d: Device, limit: float):
-    d._shell(["rm", "-f", REMOTE])
+    d.android.shell(["rm", "-f", REMOTE])
     # A plain shell call ends its session and takes background children with
     # it, so screenrecord runs in the foreground of a connection held open
     # until _stop_recording.
-    conn = d.u2._dev.shell(["screenrecord", "--bit-rate", "12000000", "--time-limit", str(int(limit)), REMOTE], stream=True)
+    conn = d.android.shell_stream(["screenrecord", "--bit-rate", "12000000", "--time-limit", str(int(limit)), REMOTE])
     for _ in range(40):
-        if d._shell(["pidof", "screenrecord"]).strip():
+        if d.android.shell(["pidof", "screenrecord"]).strip():
             break
         time.sleep(0.05)
     else:
@@ -146,9 +146,9 @@ def _start_recording(d: Device, limit: float):
 
 
 def _stop_recording(d: Device, conn) -> None:
-    d._shell(["sh", "-c", "pkill -INT screenrecord"])
+    d.android.shell(["sh", "-c", "pkill -INT screenrecord"])
     for _ in range(60):
-        if not d._shell(["pidof", "screenrecord"]).strip():
+        if not d.android.shell(["pidof", "screenrecord"]).strip():
             break
         time.sleep(0.1)
     conn.close()

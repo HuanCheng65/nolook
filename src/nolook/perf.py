@@ -80,11 +80,11 @@ def parse_gfxinfo(text: str) -> dict[str, float]:
 
 
 def reset(d: Device, package: str | None = None) -> None:
-    d._shell(["dumpsys", "gfxinfo", _pkg(d, package), "reset"])
+    d.android.shell(["dumpsys", "gfxinfo", _pkg(d, package), "reset"])
 
 
 def read(d: Device, package: str | None = None) -> dict[str, float]:
-    stats = parse_gfxinfo(d._shell(["dumpsys", "gfxinfo", _pkg(d, package)]))
+    stats = parse_gfxinfo(d.android.shell(["dumpsys", "gfxinfo", _pkg(d, package)]))
     if not stats:
         raise NolookError("gfxinfo has no frame data: is the app running and in front?")
     return stats
@@ -113,7 +113,7 @@ def swipes(d: Device, rounds: int, within: str | None, duration: float | None, g
     n = 0
     for _ in range(rounds):
         for x1, y1, x2, y2 in (fwd, back):
-            d._shell(["input", "swipe", *(str(round(v)) for v in (x1, y1, x2, y2)), str(ms)])
+            d.android.shell(["input", "swipe", *(str(round(v)) for v in (x1, y1, x2, y2)), str(ms)])
             n += 1
             time.sleep(gap)
     return {"swipes": n, "swipe_px": round(dist), "swipe_ms": ms, "speed_px_s": round(dist * 1000 / ms)}
@@ -130,7 +130,7 @@ def heat(d: Device) -> dict:
     """How warm the device is: battery °C, thermal status (Android 10+), and the most
     capped CPU's top frequency as a percent of its maximum (100: not throttled)."""
     try:
-        return parse_heat(d._shell(["sh", "-c", _HEAT]))
+        return parse_heat(d.android.shell(["sh", "-c", _HEAT]))
     except Exception:  # noqa: BLE001 - a missing reading must not stop a measurement
         return {}
 
@@ -153,7 +153,7 @@ def parse_heat(text: str) -> dict:
 
 
 def is_debuggable(d: Device, pkg: str) -> bool:
-    out = d._shell(["dumpsys", "package", pkg])
+    out = d.android.shell(["dumpsys", "package", pkg])
     m = re.search(r"pkgFlags=\[([^\]]*)\]", out)
     return bool(m and "DEBUGGABLE" in m.group(1))
 
@@ -462,7 +462,7 @@ def ab(
 
 
 def compile_status(d: Device, pkg: str) -> str:
-    out = d._shell(["dumpsys", "package", "dexopt"])
+    out = d.android.shell(["dumpsys", "package", "dexopt"])
     # The block for this package lists "[status=speed-profile] [reason=…]".
     i = out.find(f"[{pkg}]")
     if i < 0:
@@ -474,11 +474,11 @@ def compile_status(d: Device, pkg: str) -> str:
 def compile(d: Device, mode: str, package: str | None = None) -> str:
     pkg = _pkg(d, package)
     if mode == "reset":
-        d._shell(["cmd", "package", "compile", "--reset", pkg])
+        d.android.shell(["cmd", "package", "compile", "--reset", pkg])
     else:
-        d._shell(["cmd", "package", "compile", "-m", mode, "-f", pkg])
+        d.android.shell(["cmd", "package", "compile", "-m", mode, "-f", pkg])
     # Compiled code is picked up by the next process.
-    d._shell(["am", "force-stop", pkg])
+    d.android.shell(["am", "force-stop", pkg])
     return compile_status(d, pkg)
 
 
@@ -490,9 +490,9 @@ _REMOTE_DIR = "/data/misc/perfetto-traces"
 def _start_trace(d: Device, pkg: str, duration_ms: int) -> dict:
     remote = f"{_REMOTE_DIR}/nolook-{int(time.time())}.pftrace"
     cfg = TRACE_CONFIG.format(pkg=pkg, duration_ms=duration_ms)
-    d._shell(["sh", "-c", f"cat > /data/local/tmp/nolook-trace.cfg << 'EOF'\n{cfg}\nEOF"])
+    d.android.shell(["sh", "-c", f"cat > /data/local/tmp/nolook-trace.cfg << 'EOF'\n{cfg}\nEOF"])
     # Configs are read from stdin: perfetto may not open files under /data/local/tmp.
-    out = d._shell(["sh", "-c", f"cat /data/local/tmp/nolook-trace.cfg | perfetto --txt -c - -o {shlex.quote(remote)} --background"])
+    out = d.android.shell(["sh", "-c", f"cat /data/local/tmp/nolook-trace.cfg | perfetto --txt -c - -o {shlex.quote(remote)} --background"])
     pid = next((tok for tok in out.split() if tok.isdigit()), None)
     if pid is None:
         raise NolookError(f"perfetto did not start: {out.strip()[:300]}")
@@ -501,17 +501,17 @@ def _start_trace(d: Device, pkg: str, duration_ms: int) -> dict:
 
 
 def _stop_trace(d: Device, tracer: dict, local: str) -> str:
-    d._shell(["kill", "-TERM", tracer["pid"]])
+    d.android.shell(["kill", "-TERM", tracer["pid"]])
     for _ in range(50):
-        if d._shell(["sh", "-c", f"kill -0 {tracer['pid']} 2>/dev/null && echo alive"]).strip() != "alive":
+        if d.android.shell(["sh", "-c", f"kill -0 {tracer['pid']} 2>/dev/null && echo alive"]).strip() != "alive":
             break
         time.sleep(0.2)
     path = Path(local)
     if path.is_dir() or local.endswith("/"):
         path = path / Path(tracer["remote"]).name
     path.parent.mkdir(parents=True, exist_ok=True)
-    d.u2.pull(tracer["remote"], str(path))
-    d._shell(["rm", "-f", tracer["remote"]])
+    d.android.pull(tracer["remote"], str(path))
+    d.android.shell(["rm", "-f", tracer["remote"]])
     return str(path)
 
 
@@ -520,7 +520,7 @@ def _stop_trace(d: Device, tracer: dict, local: str) -> str:
 
 def last_anr(d: Device, package: str | None = None, lines: int = 40) -> list[str]:
     pkg = _pkg(d, package)
-    out = d._shell(["dumpsys", "dropbox", "--print", "data_app_anr"])
+    out = d.android.shell(["dumpsys", "dropbox", "--print", "data_app_anr"])
     entries = re.split(r"\n(?=========================================\n\d{4}-)", out)
     mine = [e for e in entries if f"Package: {pkg}" in e or f"Process: {pkg}" in e]
     if not mine:
@@ -553,7 +553,7 @@ _ENTRY = ("android.app.ActivityThread.", "android.os.Looper.", "android.os.Handl
 
 def _cpu_ticks(d: Device, pid: str) -> int | None:
     # utime + stime of the main thread, in clock ticks (fields 14 and 15 of stat).
-    stat = d._shell(["cat", f"/proc/{pid}/task/{pid}/stat"]).strip()
+    stat = d.android.shell(["cat", f"/proc/{pid}/task/{pid}/stat"]).strip()
     if ")" not in stat:
         return None
     fields = stat.rsplit(")", 1)[1].split()
@@ -571,12 +571,12 @@ def stack(d: Device, seconds: float = 3.0, top: int = 15, package: str | None = 
     (Android 10+: `<profileable android:shell="true"/>`).
     """
     pkg = _pkg(d, package)
-    pid = d._shell(["pidof", pkg]).strip().split(" ")[0]
+    pid = d.android.shell(["pidof", pkg]).strip().split(" ")[0]
     if not pid:
         raise NolookError(f"{pkg} is not running")
     data = "/data/local/tmp/nolook-stack.data"
     t0, c0 = time.monotonic(), _cpu_ticks(d, pid)
-    rec = d._shell(["sh", "-c", f"simpleperf record --app {pkg} -t {pid} -g --duration {seconds:g} -o {data} 2>&1"], timeout=int(seconds) + 60)
+    rec = d.android.shell(["sh", "-c", f"simpleperf record --app {pkg} -t {pid} -g --duration {seconds:g} -o {data} 2>&1"], timeout=int(seconds) + 60)
     if "Samples recorded" not in rec:
         hint = next((ln for ln in rec.splitlines() if "E " in ln or "rror" in ln), rec.strip()[-200:])
         raise NolookError(
@@ -585,7 +585,7 @@ def stack(d: Device, seconds: float = 3.0, top: int = 15, package: str | None = 
             '<profileable android:shell="true"/> in its manifest.'
         )
     c1, t1 = _cpu_ticks(d, pid), time.monotonic()
-    report = d._shell(["sh", "-c", f"simpleperf report -i {data} --children --sort symbol --percent-limit 0.5 2>/dev/null; rm -f {data}"], timeout=120)
+    report = d.android.shell(["sh", "-c", f"simpleperf report -i {data} --children --sort symbol --percent-limit 0.5 2>/dev/null; rm -f {data}"], timeout=120)
     m = re.search(r"Samples: (\d+)", report)
     samples = int(m.group(1)) if m else 0
     # CPU time the thread used over the wall time, from the kernel (100 ticks a second).
