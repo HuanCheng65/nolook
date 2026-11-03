@@ -148,7 +148,8 @@ def build() -> argparse.ArgumentParser:
     f = ps.add_parser("frames", help="reset gfxinfo, swipe the list back and forth, print the frame summary")
     f.add_argument("--rounds", type=int, default=4, help="forward+back swipe pairs (default 4)")
     f.add_argument("--in", dest="within", metavar="Q", help="list to swipe (default: the largest)")
-    f.add_argument("--duration", type=float, default=0.25, help="seconds per swipe")
+    f.add_argument("--speed", type=float, default=10000, help="swipe speed in px/s, which it flings at (default 10000, a quick flick)")
+    f.add_argument("--duration", type=float, help="seconds per swipe instead of --speed (0.25 matches `input swipe … 250`)")
     f.add_argument("--gap", type=float, default=0.8, help="seconds between swipes")
     f.add_argument("--axis", choices=["y", "x"], default="y")
     f.add_argument("--label", help="name this run for `perf compare`")
@@ -298,7 +299,7 @@ def perf_dispatch(d: Device, a: argparse.Namespace) -> None:
 
     keys = [k for k, _ in perf._FIELDS] if getattr(a, "all", False) else perf.SHORT
     if a.perf_cmd == "frames":
-        rec = perf.frames(d, a.rounds, a.within, a.duration, a.gap, a.axis, a.label, a.trace)
+        rec = perf.frames(d, a.rounds, a.within, a.duration, a.gap, a.axis, a.label, a.trace, speed=a.speed)
         print(json.dumps(rec, ensure_ascii=False) if a.json else perf.format_record(rec, keys))
         if rec.get("trace") and not a.json:
             print(f"trace: {rec['trace']}  (open in ui.perfetto.dev)")

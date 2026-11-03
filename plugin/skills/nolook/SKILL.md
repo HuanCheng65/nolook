@@ -153,6 +153,10 @@ nolook perf reset … nolook perf read                   # measure your own inte
 nolook perf anr                    # last ANR: header and main-thread stack
 ```
 
+Swipes fling at `--speed` px/s (default 10000, a quick flick); `--duration
+0.25` reproduces a 250 ms `input swipe`. The summary prints the speed the
+device actually reached, which is lower when it paces the steps slower.
+
 The summary is janky % (new and legacy), p50/p90/p99 frame time, GPU p90,
 slow UI thread and missed-deadline counts, plus the compile mode. Measure on
 a real device; emulator frame times say little. Change one thing between
