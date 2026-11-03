@@ -5,15 +5,28 @@ on:
     tags: ["v*"]
 
 jobs:
-  pypi:
+  release:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write   # PyPI Trusted Publishing: no token stored anywhere
+      contents: write   # create the GitHub release
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the release notes need the history since the last tag
       - uses: astral-sh/setup-uv@v6
-      - name: Check the tag matches the package version
-        run: test "v$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
+      - name: Check the tag matches every version
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          test "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" = "$want"
+          test "$(jq -r .version plugin/.claude-plugin/plugin.json)" = "$want"
+      - run: uv run --extra dev pytest -q
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Release notes for this tag
+        run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "nolook ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md --verify-tag
