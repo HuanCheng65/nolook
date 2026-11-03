@@ -143,6 +143,11 @@ def build() -> argparse.ArgumentParser:
     t.add_argument("query")
     t.add_argument("--limit", type=int, default=40)
 
+    s = sub.add_parser("screen")  # the Claude Code pane's live view; left out of --help below
+    s.add_argument("--stream", action="store_true", required=True)
+    s.add_argument("--width", type=int, default=360)
+    s.add_argument("--fps", type=float, default=5.0)
+    s.add_argument("--control", help="JSON file the pane writes: {live, refresh}")
     s = sub.add_parser("topng")  # for the Claude Code pane, which draws PNGs only; left out of --help below
     s.add_argument("src")
     s.add_argument("dst", nargs="?", help="default: beside src, as .png")
@@ -196,7 +201,7 @@ def build() -> argparse.ArgumentParser:
     c.add_argument("--top", type=int, default=15)
     c = ps.add_parser("anr", help="the last ANR's header and main thread stack")
     c.add_argument("-n", type=int, default=40)
-    sub._choices_actions = [a for a in sub._choices_actions if a.dest != "topng"]
+    sub._choices_actions = [a for a in sub._choices_actions if a.dest not in ("topng", "screen")]
     return p
 
 
@@ -233,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
         img.save(dst, "PNG")
         print(dst)
         return 0
+
+    if a.cmd == "screen":
+        from . import screen
+
+        try:
+            return screen.stream(cfg, a.session, a.width, a.fps, a.control)
+        except KeyboardInterrupt:
+            return 0
 
     if a.cmd == "doctor":
         from . import doctor
