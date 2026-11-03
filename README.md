@@ -58,8 +58,10 @@ screen changed (6 elements):
   overshoot and stalls, with one sheet of key frames.
 - **Measures performance.** Frame timing over repeated flings (gfxinfo),
   compile modes, Perfetto traces read into a one-page summary, ANR stacks.
-- **Shows you the device** (Claude Code): a pane beside the chat with the
-  device's screen after each command. You see it; the model does not.
+- **Shows you the device** (Claude Code): a pane beside the chat with a
+  live mirror of the screen, the element each tap hit outlined, and what
+  every action did, a subagent's and a flow's included. You see it; the
+  model does not. It stays off the device while perf or motion measures.
 
 ## Install
 

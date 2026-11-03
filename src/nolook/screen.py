@@ -3,6 +3,7 @@
 `nolook screen --stream` keeps one connection open and prints, one JSON
 object per line:
 
+  {"control": path}                            first: where the pane writes its control file
   {"device": serial, "size": [w, h]}            on connecting
   {"app": package}                             when the app in front changes
   {"frame": path, "w": .., "h": .., "v": n}    a new PNG; paths alternate
@@ -12,8 +13,8 @@ object per line:
 
 A frame is written only when the screen or the marker over the last tapped
 element changed. Polling slows down while nothing moves. The control file
-the pane writes holds {"live": bool, "refresh": n}: paused, it captures only
-after an action or a refresh.
+the pane writes holds {"live": bool, "refresh": n, "quit": bool}: paused, it
+captures only after an action or a refresh; quit ends it.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from .config import Config, follow_session
+from .config import Config, follow_session, session_dir
 from .device import Device, NolookError
 
 MARK_FOR = 2.0  # seconds the last tapped element stays outlined
@@ -111,9 +112,7 @@ def compose(img, box: list[int] | None, scale: float):
     return out
 
 
-def read_control(path: Path | None) -> dict:
-    if path is None:
-        return {}
+def read_control(path: Path) -> dict:
     try:
         return json.loads(path.read_text())
     except (OSError, ValueError):
@@ -123,9 +122,16 @@ def read_control(path: Path | None) -> dict:
 def stream(cfg: Config, session: str | None, width: int = 360, fps: float = 5.0, control: str | None = None) -> int:
     # This process only watches: it must not become the device the session drove last.
     os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
-    ctl_path = Path(control) if control else None
+    ctl_path = Path(control) if control else session_dir() / f"{session or os.getpid()}.pane.json"
+    try:
+        ctl_path.unlink(missing_ok=True)  # a quit left by the last pane
+    except OSError:
+        pass
+    emit({"control": str(ctl_path)})
     fastest = 1 / max(fps, 0.5)
     while True:
+        if read_control(ctl_path).get("quit"):
+            return 0
         try:
             if session:
                 follow_session(cfg, session)
@@ -135,7 +141,8 @@ def stream(cfg: Config, session: str | None, width: int = 360, fps: float = 5.0,
             time.sleep(3)
             continue
         try:
-            _watch(d, cfg, session, width, fastest, ctl_path)
+            if _watch(d, cfg, session, width, fastest, ctl_path) == "quit":
+                return 0
         except BrokenPipeError:
             return 0
         except Exception as e:  # noqa: BLE001 - the device went away; connect again
@@ -143,7 +150,7 @@ def stream(cfg: Config, session: str | None, width: int = 360, fps: float = 5.0,
             time.sleep(2)
 
 
-def _watch(d: Device, cfg: Config, session: str | None, width: int, fastest: float, ctl_path: Path | None) -> None:
+def _watch(d: Device, cfg: Config, session: str | None, width: int, fastest: float, ctl_path: Path) -> str | None:
     emit({"device": d.serial, "size": list(d.size)})
     # Each pane its own frames: two sessions may mirror one device.
     out_dir = d.dir / "pane" / re.sub(r"[^\w-]", "_", session or str(os.getpid()))
@@ -168,6 +175,8 @@ def _watch(d: Device, cfg: Config, session: str | None, width: int, fastest: flo
             last_action = a
             pending = True
         ctl = read_control(ctl_path)
+        if ctl.get("quit"):
+            return "quit"
         live = ctl.get("live", True)
         if ctl.get("refresh", 0) != refresh_seen:
             refresh_seen = ctl.get("refresh", 0)
@@ -193,7 +202,7 @@ def _watch(d: Device, cfg: Config, session: str | None, width: int, fastest: flo
             before = cfg.serial
             follow_session(cfg, session)
             if cfg.serial and cfg.serial != before and cfg.serial != d.serial:
-                return  # the session moved to another device: connect to it
+                return None  # the session moved to another device: connect to it
 
         box = mark_box(last_action, now)
         if live or pending or box != prev_box:

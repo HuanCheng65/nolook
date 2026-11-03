@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             img = img.resize((a.width, round(img.height * a.width / img.width)))
         dst = a.dst or str(Path(a.src).with_suffix(".pane.png"))
         img.save(dst, "PNG")
-        print(dst)
+        print(f"{dst} {img.width}x{img.height}")
         return 0
 
     if a.cmd == "screen":
