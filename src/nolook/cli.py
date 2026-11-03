@@ -24,6 +24,11 @@ def print_nodes(ns: list[Node], cap: int | None = SNAP_CAP) -> None:
         print(f"… {len(ns) - len(shown)} more (nolook snap --all)")
 
 
+# Commands whose failures go to the journal the pane shows (their successes
+# are journaled by Device).
+ACTIONS = {"tap", "type", "key", "back", "scroll", "wait", "open", "launch", "shot", "motion"}
+
+
 def report(verb: str, o: Outcome, quiet: bool = False) -> None:
     head = verb
     if o.target is not None:
@@ -255,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         list_flows(cfg)
         return 0
 
+    d = None
     try:
         if a.cmd == "run":
             from .flow import run_flow
@@ -264,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
         return dispatch(d, a)
     except (NolookError, QueryError) as e:
         print(f"error: {e}", file=sys.stderr)
+        if d is not None and a.cmd in ACTIONS:
+            d.journal({"verb": a.cmd, "query": getattr(a, "query", None) or getattr(a, "into", None), "error": str(e).splitlines()[0][:200]})
         return 1
     except KeyboardInterrupt:
         return 130

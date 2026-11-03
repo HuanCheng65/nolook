@@ -210,10 +210,13 @@ class Measure:
 
         d = self._flow._d
         self.debuggable = perf.check_build(d, perf._pkg(d, None), self.allow_debuggable)
+        self._busy = d.busy("measure")
+        self._busy.__enter__()
         perf.reset(d)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        self._busy.__exit__(None, None, None)
         if exc_type is not None:
             return
         from . import perf
@@ -520,11 +523,13 @@ def run_flow(cfg: Config, name: str, args: list[str]) -> int:
             # A bare assert says nothing; its source line says what was expected.
             msg = "assert failed: " + linecache.getline(str(path), line).strip()
         print(f"  ✗ step {flow.steps + 1}" + (f" (line {line})" if line else "") + f": {msg}")
+        d.journal({"verb": "flow", "query": path.stem, "error": msg.splitlines()[0][:200] if msg else "failed", "steps": flow.steps})
         _print_results(flow)
         _dump_failure(d)
         return 1
     except Exception:  # noqa: BLE001 - a bug in the flow itself
         print("  ✗ the flow raised:")
+        d.journal({"verb": "flow", "query": path.stem, "error": "the flow raised an exception", "steps": flow.steps})
         traceback.print_exc(file=sys.stdout)
         _print_results(flow)
         return 1
@@ -536,6 +541,7 @@ def run_flow(cfg: Config, name: str, args: list[str]) -> int:
         verb, worst = max(flow.slow_waits, key=lambda x: x[1])
         warn += f" · ⚠ {len(flow.slow_waits)} steps waited over {flow.slow_wait:g}s (longest {worst:.1f}s: {verb})"
     print(f"done · {flow.steps} steps · {took}s{warn}")
+    d.journal({"verb": "flow", "query": path.stem, "steps": flow.steps, "took": took, "guard": flow.guard_hits[:3] or None})
     _print_results(flow)
     return 0
 

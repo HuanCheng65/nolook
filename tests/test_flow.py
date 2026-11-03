@@ -41,6 +41,9 @@ class FakeDevice:
     def explain(self, msg):
         return msg
 
+    def journal(self, entry):
+        self.journaled = [*getattr(self, "journaled", []), entry]
+
     def wait(self, q, gone=False, timeout=10.0):
         ns = self.nodes()
         if bool(tree.match(ns, q)) == gone:

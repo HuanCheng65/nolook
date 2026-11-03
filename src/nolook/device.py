@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 SETTLE_POLL = 0.15
 SETTLE_MIN = 0.3
+JOURNAL_KEEP = 300
 
 
 @dataclass
@@ -135,7 +137,7 @@ class Device:
             )
         x, y = n.center
         fn = (lambda: self.backend.long_click(x, y)) if long else (lambda: self.backend.click(x, y))
-        return self._act(ns, n, fn, settle)
+        return self._done("long-press" if long else "tap", self._act(ns, n, fn, settle), q)
 
     def dangerous(self, n: Node) -> str | None:
         words = [p.lower() for p in n.parts] + [n.rid.lower()]
@@ -148,7 +150,7 @@ class Device:
 
     def tap_xy(self, x: int, y: int, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
-        return self._act(ns, None, lambda: self.backend.click(x, y), settle)
+        return self._done("tap", self._act(ns, None, lambda: self.backend.click(x, y), settle), f"({x},{y})", point=(x, y))
 
     def type(self, text: str, q: str | None = None, nth: int | None = None, append: bool = False, settle: float = 2.0) -> Outcome:
         if q is not None:
@@ -161,11 +163,11 @@ class Device:
         if field is None:
             raise NolookError("no focused text field; give one: nolook type '<text>' --into <query>")
         value = (field.text + text) if append else text
-        return self._act(ns, field, lambda: self.backend.set_text(value), settle)
+        return self._done("type", self._act(ns, field, lambda: self.backend.set_text(value), settle), q)
 
     def key(self, name: str, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
-        return self._act(ns, None, lambda: self.backend.press(name), settle)
+        return self._done("key", self._act(ns, None, lambda: self.backend.press(name), settle), name)
 
     def scroll(self, direction: str, within: str | None = None, until: str | None = None, max_swipes: int = 10, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
@@ -194,7 +196,7 @@ class Device:
             if until and not _visible_hit(cur, until):
                 raise NolookError(f"{until!r} not in view after {max_swipes} swipes")
         target = _visible_hit(cur, until) if until else box
-        return Outcome(target, start, cur, took, self._guard(mark))
+        return self._done(f"scroll {direction}", Outcome(target, start, cur, took, self._guard(mark)), until)
 
     def _scroll_box(self, ns: list[Node], within: str | None) -> Node | None:
         if within:
@@ -219,7 +221,7 @@ class Device:
 
     def open(self, uri: str, settle: float = 5.0) -> Outcome:
         ns = self.nodes()
-        return self._act(ns, None, lambda: self.backend.open_uri(uri, self.cfg.package), settle)
+        return self._done("open", self._act(ns, None, lambda: self.backend.open_uri(uri, self.cfg.package), settle), uri)
 
     def launch(self, package: str | None = None, fresh: bool = False, settle: float = 6.0) -> Outcome:
         pkg = package or self.cfg.package
@@ -240,7 +242,7 @@ class Device:
             time.sleep(SETTLE_POLL)
         after, took = self.settle(settle)
         took = None if took is None else round(time.monotonic() - start, 2)
-        return Outcome(None, ns, after, took, self._guard(mark))
+        return self._done("launch", Outcome(None, ns, after, took, self._guard(mark)), pkg)
 
     # Pixels -----------------------------------------------------------------
 
@@ -275,12 +277,52 @@ class Device:
             img.save(path, "PNG")
         else:
             img.convert("RGB").save(path, "JPEG", quality=72)
+        self.journal({"verb": "shot", "query": q, "picture": str(path)})
         return {
             "path": str(path),
             "size": img.size,
             "kb": round(path.stat().st_size / 1024),
             "tokens": round(img.width * img.height / 750),
         }
+
+    # The journal ---------------------------------------------------------------
+
+    def journal(self, entry: dict) -> None:
+        """One line per action in actions.jsonl, which the Claude Code pane shows."""
+        f = self.dir / "actions.jsonl"
+        try:
+            with f.open("a") as fh:
+                fh.write(json.dumps({"at": round(time.time(), 2), **entry}, ensure_ascii=False) + "\n")
+            if f.stat().st_size > 256_000:
+                f.write_text("\n".join(f.read_text().splitlines()[-JOURNAL_KEEP:]) + "\n")
+        except OSError:
+            pass
+
+    def _done(self, verb: str, o: Outcome, query: str | None = None, point: tuple[int, int] | None = None) -> Outcome:
+        e: dict = {"verb": verb, "query": query, "settled": o.settled}
+        if o.target is not None:
+            t = o.target
+            # A field's label is its text: what was typed there before, perhaps a password.
+            label = "" if verb == "type" else t.label[:60]
+            e["target"] = {"role": t.role, "label": label, "id": t.rid, "bounds": list(t.bounds)}
+        if point is not None:
+            e["point"] = list(point)
+        lines, wholesale = tree.delta(o.before, o.after)
+        e["change"] = "screen" if wholesale else len(lines)
+        if o.guard_hits:
+            e["guard"] = o.guard_hits[:3]
+        self.journal(e)
+        return o
+
+    @contextmanager
+    def busy(self, what: str):
+        """Holds the pane's mirror off the device while a measurement runs: its screenshots would cost frames."""
+        f = self.dir / "busy"
+        f.write_text(json.dumps({"pid": os.getpid(), "what": what}))
+        try:
+            yield
+        finally:
+            f.unlink(missing_ok=True)
 
     def _record_perf(self, rec: dict) -> None:
         with (self.dir / "perf.jsonl").open("a") as f:

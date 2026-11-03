@@ -35,7 +35,15 @@ def _need_ffmpeg() -> None:
             raise NolookError(f"motion needs {tool} on this machine")
 
 
-def record(
+def record(d: Device, *args, **kw) -> dict:
+    """Record the screen around a trigger and measure what moved; see `_record`."""
+    with d.busy("motion"):
+        report = _record(d, *args, **kw)
+    d.journal({"verb": "motion", "query": report.get("trigger") or None, "picture": report.get("sheet"), "label": report.get("label") or None})
+    return report
+
+
+def _record(
     d: Device,
     tap: str | None = None,
     after: str | None = None,

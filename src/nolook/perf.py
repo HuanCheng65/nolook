@@ -179,7 +179,13 @@ def check_build(d: Device, pkg: str, allow_debuggable: bool) -> bool:
     return dbg
 
 
-def frames(
+def frames(d: Device, *args, **kw) -> dict:
+    """Measure frame timing; see `_frames`."""
+    with d.busy("perf frames"):
+        return _frames(d, *args, **kw)
+
+
+def _frames(
     d: Device,
     rounds: int = 4,
     within: str | None = None,
@@ -563,7 +569,12 @@ def _cpu_ticks(d: Device, pid: str) -> int | None:
         return None
 
 
-def stack(d: Device, seconds: float = 3.0, top: int = 15, package: str | None = None) -> list[str]:
+def stack(d: Device, *args, **kw) -> list[str]:
+    with d.busy("perf stack"):
+        return _stack(d, *args, **kw)
+
+
+def _stack(d: Device, seconds: float = 3.0, top: int = 15, package: str | None = None) -> list[str]:
     """Sample the main thread with simpleperf: which Java code it spent its CPU in.
 
     For a hang that spins (a loop, CPU at 100%) this names the code at once,

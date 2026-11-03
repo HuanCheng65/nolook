@@ -129,3 +129,35 @@ def test_a_miss_says_what_is_in_the_way():
 def test_android_only_steps_refuse_another_backend():
     with pytest.raises(NolookError, match="needs an Android device"):
         make(FakeBackend({"main": LIKE})).android
+
+
+def test_actions_go_to_the_journal_the_pane_reads():
+    import json
+
+    b = FakeBackend({"main": LIKE, "next": screen(node((0, 0, 1080, 200), text="Opened"))}, {(0, 400, 1080, 600): "next"})
+    d = make(b)
+    d.tap("Open")
+    d.key("back")
+    lines = [json.loads(ln) for ln in (d.dir / "actions.jsonl").read_text().splitlines()]
+    assert [e["verb"] for e in lines] == ["tap", "key"]
+    assert lines[0]["query"] == "Open" and lines[0]["target"]["bounds"] == [0, 400, 1080, 600]
+    assert lines[0]["change"] == "screen" and lines[1]["change"] == 0
+
+
+def test_the_journal_keeps_no_text_of_a_field():
+    import json
+
+    field = node((0, 0, 1080, 200), cls="android.widget.EditText", text="hunter2", clickable=True, focused=True)
+    d = make(FakeBackend({"main": screen(field)}))
+    d.type("secret")
+    entry = json.loads((d.dir / "actions.jsonl").read_text())
+    assert "hunter2" not in json.dumps(entry) and "secret" not in json.dumps(entry)
+
+
+def test_busy_marks_a_measurement_and_clears_after_a_failure():
+    d = make(FakeBackend({"main": LIKE}))
+    with pytest.raises(RuntimeError):
+        with d.busy("perf frames"):
+            assert (d.dir / "busy").exists()
+            raise RuntimeError
+    assert not (d.dir / "busy").exists()
