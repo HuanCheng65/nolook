@@ -90,11 +90,14 @@ class Device:
             m = re.search(r"mWakefulness=(\w+)", power)
             if m and m.group(1) != "Awake":
                 return f"the screen is off ({m.group(1).lower()})"
-            win = self._shell(["dumpsys", "window"])
-            if re.search(r"(isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|isStatusBarKeyguard)=true", win):
+            locked = r"(isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|isStatusBarKeyguard)=true"
+            if re.search(locked, self._shell(["dumpsys", "window"])):
+                return "the device is locked"
+            # Some ROMs report the lock screen only in KeyguardController's section here.
+            acts = self._shell(["dumpsys", "activity", "activities"])
+            if re.search(r"(mKeyguardShowing|keyguardShowing)=true", acts):
                 return "the device is locked"
             if self.cfg.package:
-                acts = self._shell(["dumpsys", "activity", "activities"])
                 m = re.search(r"(?:topResumedActivity|mResumedActivity)[=:] ?ActivityRecord\{\S+ \S+ ([\w.]+)/", acts)
                 if m and m.group(1) != self.cfg.package:
                     return f"{m.group(1)} is in front, not {self.cfg.package}"
