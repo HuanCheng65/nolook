@@ -2,6 +2,7 @@
 
 Every action reads a fresh tree before it acts and waits for the screen to
 settle after, so its caller gets back what changed without asking again.
+The platform's part, reading the screen and sending input, is a Backend.
 """
 
 from __future__ import annotations
@@ -12,17 +13,18 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import tree
+from .backend import Backend, NolookError
 from .config import Config, cache_dir, session_dir
 from .tree import Node, QueryError
 
+if TYPE_CHECKING:
+    from .android import AndroidBackend
+
 SETTLE_POLL = 0.15
 SETTLE_MIN = 0.3
-
-
-class NolookError(Exception):
-    pass
 
 
 @dataclass
@@ -37,18 +39,16 @@ class Outcome:
 
 
 class Device:
-    def __init__(self, cfg: Config):
-        import uiautomator2 as u2  # imported late: --help should not pay for it
-
+    def __init__(self, cfg: Config, backend: Backend | None = None):
         self.cfg = cfg
-        try:
-            self.u2 = u2.connect(cfg.serial) if cfg.serial else u2.connect()
-        except Exception as e:  # noqa: BLE001 - u2 raises many kinds
-            raise NolookError(f"cannot connect to {cfg.serial or 'the default device'}: {e}") from e
-        _retry_stale_connections(self.u2)
-        self.serial = self.u2.serial
+        if backend is None:
+            from .android import AndroidBackend
+
+            backend = AndroidBackend(cfg.serial)
+        self.backend = backend
+        self.serial = backend.id
         _remember_device(self.serial)
-        self.size = self.u2.window_size()
+        self.size = backend.size
         self.dir = cache_dir(self.serial)
         self._state_file = self.dir / "state.json"
         try:
@@ -60,17 +60,17 @@ class Device:
 
     # Reading ----------------------------------------------------------------
 
+    @property
+    def android(self) -> AndroidBackend:
+        """The backend, for what only Android has (adb shell, gfxinfo, screenrecord)."""
+        from .android import AndroidBackend
+
+        if not isinstance(self.backend, AndroidBackend):
+            raise NolookError("this needs an Android device")
+        return self.backend
+
     def nodes(self) -> list[Node]:
-        # A dump can fail while the app is starting or a window is changing.
-        for attempt in range(3):
-            try:
-                xml = self.u2.dump_hierarchy()
-                break
-            except Exception as e:  # noqa: BLE001
-                if attempt == 2:
-                    raise NolookError(f"cannot read the UI tree: {type(e).__name__}: {e}") from e
-                time.sleep(0.4)
-        ns = [n for n in tree.parse(xml, self.size) if n.pkg not in self.cfg.hide]
+        ns = [n for n in self.backend.dump() if n.pkg not in self.cfg.hide]
         self._counter = tree.assign_refs(ns, self._prev, self._counter)
         self._prev = tree.to_state(ns)
         self._state_file.write_text(json.dumps({"nodes": self._prev, "counter": self._counter}))
@@ -86,24 +86,9 @@ class Device:
     def interruption(self) -> str | None:
         """Why the app may not be showing what a step expects: screen off, locked, another app in front."""
         try:
-            power = self._shell(["dumpsys", "power"])
-            m = re.search(r"mWakefulness=(\w+)", power)
-            if m and m.group(1) != "Awake":
-                return f"the screen is off ({m.group(1).lower()})"
-            locked = r"(isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|isStatusBarKeyguard)=true"
-            if re.search(locked, self._shell(["dumpsys", "window"])):
-                return "the device is locked"
-            # Some ROMs report the lock screen only in KeyguardController's section here.
-            acts = self._shell(["dumpsys", "activity", "activities"])
-            if re.search(r"(mKeyguardShowing|keyguardShowing)=true", acts):
-                return "the device is locked"
-            if self.cfg.package:
-                m = re.search(r"(?:topResumedActivity|mResumedActivity)[=:] ?ActivityRecord\{\S+ \S+ ([\w.]+)/", acts)
-                if m and m.group(1) != self.cfg.package:
-                    return f"{m.group(1)} is in front, not {self.cfg.package}"
+            return self.backend.interruption(self.cfg.package)
         except Exception:  # noqa: BLE001 - a diagnosis must never hide the original error
             return None
-        return None
 
     def explain(self, msg: str) -> str:
         why = self.interruption()
@@ -149,7 +134,7 @@ class Device:
                 "Scroll it into view (nolook scroll … --until), or pass --force if that is intended."
             )
         x, y = n.center
-        fn = (lambda: self.u2.long_click(x, y)) if long else (lambda: self.u2.click(x, y))
+        fn = (lambda: self.backend.long_click(x, y)) if long else (lambda: self.backend.click(x, y))
         return self._act(ns, n, fn, settle)
 
     def dangerous(self, n: Node) -> str | None:
@@ -163,25 +148,24 @@ class Device:
 
     def tap_xy(self, x: int, y: int, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
-        return self._act(ns, None, lambda: self.u2.click(x, y), settle)
+        return self._act(ns, None, lambda: self.backend.click(x, y), settle)
 
     def type(self, text: str, q: str | None = None, nth: int | None = None, append: bool = False, settle: float = 2.0) -> Outcome:
         if q is not None:
             n, ns = self.find(q, nth)
             if not n.flags.get("focused"):
-                self.u2.click(*n.center)
+                self.backend.click(*n.center)
                 time.sleep(0.3)
         ns = self.nodes()
         field = next((n for n in ns if n.role == "input" and n.flags.get("focused")), None)
         if field is None:
             raise NolookError("no focused text field; give one: nolook type '<text>' --into <query>")
-        el = self.u2(focused=True)
         value = (field.text + text) if append else text
-        return self._act(ns, field, lambda: el.set_text(value), settle)
+        return self._act(ns, field, lambda: self.backend.set_text(value), settle)
 
     def key(self, name: str, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
-        return self._act(ns, None, lambda: self.u2.press(name), settle)
+        return self._act(ns, None, lambda: self.backend.press(name), settle)
 
     def scroll(self, direction: str, within: str | None = None, until: str | None = None, max_swipes: int = 10, settle: float = 3.0) -> Outcome:
         ns = self.nodes()
@@ -194,7 +178,7 @@ class Device:
         start = ns
 
         def swipe():
-            self.u2.swipe(cx - vec[0], cy - vec[1], cx + vec[0], cy + vec[1], duration=0.25)
+            self.backend.swipe(cx - vec[0], cy - vec[1], cx + vec[0], cy + vec[1], 0.25)
 
         mark = self._device_time()
         cur, took = ns, None
@@ -235,23 +219,18 @@ class Device:
 
     def open(self, uri: str, settle: float = 5.0) -> Outcome:
         ns = self.nodes()
-        cmd = ["am", "start", "-a", "android.intent.action.VIEW", "-d", uri]
-        if self.cfg.package:
-            cmd += ["-p", self.cfg.package]
-        return self._act(ns, None, lambda: self._shell(cmd), settle)
+        return self._act(ns, None, lambda: self.backend.open_uri(uri, self.cfg.package), settle)
 
     def launch(self, package: str | None = None, fresh: bool = False, settle: float = 6.0) -> Outcome:
         pkg = package or self.cfg.package
         if not pkg:
             raise NolookError("no package: pass one, or set package in .nolook.toml")
-        comp = self._shell(["cmd", "package", "resolve-activity", "--brief", pkg]).strip().splitlines()[-1]
-        if "/" not in comp:
-            raise NolookError(f"{pkg} has no launcher activity")
+        entry = self.backend.launcher(pkg)
         if fresh:
-            self._shell(["am", "force-stop", pkg])
+            self.backend.stop(pkg)
         ns = self.nodes()
         mark = self._device_time()
-        self._shell(["am", "start", "-n", comp])
+        self.backend.start(entry)
         # A starting app shows nothing for a moment, and nothing is stable too:
         # wait for the app's own elements before waiting for them to settle.
         start = time.monotonic()
@@ -266,7 +245,7 @@ class Device:
     # Pixels -----------------------------------------------------------------
 
     def shot(self, q: str | None = None, region: tuple[int, int, int, int] | None = None, width: int | None = None, full: bool = False, out: str | None = None, png: bool = False) -> dict:
-        img = self.u2.screenshot()
+        img = self.backend.screenshot()
         label = "screen"
         if q is not None:
             n, _ = self.find(q)
@@ -310,43 +289,26 @@ class Device:
     # Logs -------------------------------------------------------------------
 
     def log(self, lines: int = 40, grep: str | None = None, level: str | None = None) -> list[str]:
-        cmd = ["logcat", "-d", "-t", str(max(lines * 20, 500) if grep else lines)]
-        pid = self._pid()
-        if pid:
-            cmd.append(f"--pid={pid}")
-        if level:
-            cmd.append(f"*:{level.upper()}")
-        out = self._shell(cmd).splitlines()
-        if grep:
-            rx = re.compile(grep)
-            out = [ln for ln in out if rx.search(ln)]
-        return out[-lines:]
+        return self.backend.log(lines, grep, level, self.cfg.package)
 
     def _guard(self, since: str | None) -> list[str]:
         if not self.cfg.guard or since is None:
             return []
-        out = self._shell(["logcat", "-d", "-T", since])
+        out = self.backend.log_since(since)
         rx = re.compile("|".join(f"(?:{g})" for g in self.cfg.guard))
         return [ln for ln in out.splitlines() if rx.search(ln)][:10]
 
     def _device_time(self) -> str | None:
-        if not self.cfg.guard:
-            return None
-        # logcat -T takes epoch seconds; a second of slack beats a missed line.
-        return f"{int(self._shell(['date', '+%s']).strip()) - 1}.000"
+        return self.backend.log_mark() if self.cfg.guard else None
 
-    def _pid(self) -> str | None:
-        if not self.cfg.package:
-            return None
-        return self._shell(["pidof", self.cfg.package]).strip().split(" ")[0] or None
+    # Moving to `android`: perf and motion still call these.
+
+    @property
+    def u2(self):
+        return self.android.u2
 
     def _shell(self, cmd: list[str], timeout: int = 60) -> str:
-        # The connection to the device server drops now and then; one retry covers it.
-        try:
-            return self.u2.shell(cmd, timeout=timeout).output
-        except (ConnectionError, OSError):
-            time.sleep(0.5)
-            return self.u2.shell(cmd, timeout=timeout).output
+        return self.android.shell(cmd, timeout)
 
 
 def _remember_device(serial: str) -> None:
@@ -362,28 +324,6 @@ def _remember_device(serial: str) -> None:
         (d / f"{session}.json").write_text(json.dumps(rec))
     except OSError:
         pass
-
-
-def _retry_stale_connections(dev) -> None:
-    # The device server closes idle keep-alive connections; the next request
-    # then fails with RemoteDisconnected before the server saw it, so sending
-    # it once more is safe.
-    import http.client
-
-    from uiautomator2.core import BasicUiautomatorServer
-
-    if getattr(BasicUiautomatorServer, "_nolook_retry", False):
-        return
-    orig = BasicUiautomatorServer.jsonrpc_call
-
-    def call(self, *args, **kwargs):
-        try:
-            return orig(self, *args, **kwargs)
-        except http.client.RemoteDisconnected:
-            return orig(self, *args, **kwargs)
-
-    BasicUiautomatorServer.jsonrpc_call = call
-    BasicUiautomatorServer._nolook_retry = True
 
 
 def _sig(ns: list[Node]) -> list:
