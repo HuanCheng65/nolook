@@ -66,3 +66,24 @@ def cache_dir(serial: str) -> Path:
     d = base / serial.replace(":", "_")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def session_dir() -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "nolook" / "sessions"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def follow_session(cfg: Config, session: str) -> bool:
+    """Point cfg at the device a Claude Code session last drove; False if none is recorded."""
+    import json
+
+    try:
+        rec = json.loads((session_dir() / f"{session}.json").read_text())
+    except (OSError, ValueError):
+        return False
+    cfg.serial = rec.get("serial") or cfg.serial
+    if rec.get("adb_port"):
+        cfg.adb_port = int(rec["adb_port"])
+        os.environ["ANDROID_ADB_SERVER_PORT"] = str(cfg.adb_port)
+    return True

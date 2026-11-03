@@ -7,13 +7,14 @@ settle after, so its caller gets back what changed without asking again.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import tree
-from .config import Config, cache_dir
+from .config import Config, cache_dir, session_dir
 from .tree import Node, QueryError
 
 SETTLE_POLL = 0.15
@@ -46,6 +47,7 @@ class Device:
             raise NolookError(f"cannot connect to {cfg.serial or 'the default device'}: {e}") from e
         _retry_stale_connections(self.u2)
         self.serial = self.u2.serial
+        _remember_device(self.serial)
         self.size = self.u2.window_size()
         self.dir = cache_dir(self.serial)
         self._state_file = self.dir / "state.json"
@@ -301,6 +303,21 @@ class Device:
         except (ConnectionError, OSError):
             time.sleep(0.5)
             return self.u2.shell(cmd, timeout=timeout).output
+
+
+def _remember_device(serial: str) -> None:
+    # Which device this Claude Code session drove last, so a pane can show the
+    # same one: the agent's commands may pick it by a config or env var the
+    # pane's own process never sees.
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not session or not re.fullmatch(r"[\w-]{1,80}", session):
+        return
+    d = session_dir()
+    rec = {"serial": serial, "adb_port": os.environ.get("ANDROID_ADB_SERVER_PORT"), "time": time.time()}
+    try:
+        (d / f"{session}.json").write_text(json.dumps(rec))
+    except OSError:
+        pass
 
 
 def _retry_stale_connections(dev) -> None:

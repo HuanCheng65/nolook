@@ -64,7 +64,10 @@ async function refresh($: EngineInterface) {
   if (refreshing) return
   refreshing = true
   try {
-    const ran = await $.process.run(['nolook', 'shot', '--png', '--width', '360', '-o', mirrorPath], { timeoutMs: 15000 })
+    // The device this session's agent drove last: its commands may pick one by
+    // a config or env var this process never sees.
+    const session = await $.session.id()
+    const ran = await $.process.run(['nolook', '--session', session, 'shot', '--png', '--width', '360', '-o', mirrorPath], { timeoutMs: 15000 })
     if (ran.exitCode === 0) {
       mirror = { ...(await pngSize($, mirrorPath)), at: await clockText($) }
       await update($, gen, n => n + 1)

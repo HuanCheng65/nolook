@@ -44,6 +44,10 @@ only; the model never reads them.
 `/device` opens it, `/device live` refreshes it every two seconds,
 `/device still` stops that. In the pane, `r` refreshes and `l` toggles live.
 
+The pane follows the device this session's agent last drove, whatever
+config or env var picked it. Leave live mode off while measuring
+performance: a screenshot every two seconds costs the device time.
+
 It needs a terminal with the kitty graphics protocol (Ghostty, kitty, or
 iTerm2 3.5+). Inside a multiplexer Claude Code may not recognise one: herdr,
 for instance, answers the graphics query but reports itself as

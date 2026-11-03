@@ -57,6 +57,7 @@ def build() -> argparse.ArgumentParser:
     )
     p.add_argument("--serial", help="device serial (default: .nolook.toml, then the only device)")
     p.add_argument("-q", "--quiet", action="store_true", help="print the action line only, no changes")
+    p.add_argument("--session", help=argparse.SUPPRESS)  # the device a Claude Code session last drove, for its pane
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("snap", help="list what is on screen, with refs")
@@ -173,6 +174,10 @@ def build() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     a = build().parse_args(argv)
     cfg = find_config()
+    if a.session:
+        from .config import follow_session
+
+        follow_session(cfg, a.session)
     if a.serial:
         cfg.serial = a.serial
 
