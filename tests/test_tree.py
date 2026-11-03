@@ -118,3 +118,11 @@ def test_large_unclickable_overlay_is_not_a_cover():
     overlay = node((0, 0, 1080, 2400), desc="主屏幕")
     ns = parsed(screen(node((100, 100, 300, 300), clickable=True, desc="设置"), overlay))
     assert not tree.resolve(ns, "设置").covered
+
+
+def test_id_only_containers_scope_but_are_not_listed():
+    ns = parsed(screen(node((0, 0, 1080, 800), rid="sheet", children=node((0, 100, 500, 200), clickable=True, desc="OK"))))
+    sheet = tree.resolve(ns, "#sheet")
+    assert sheet.role == "box"
+    assert [n.label for n in tree.within(ns, sheet)] == ["OK"]
+    assert [n.role for n in tree.listed(ns)] == ["btn"]
