@@ -121,6 +121,21 @@ def build() -> argparse.ArgumentParser:
 
     sub.add_parser("flows", help="list the project's flows")
 
+    s = sub.add_parser("motion", help="record an animation and report its timing, curve and stalls")
+    s.add_argument("--tap", metavar="Q", help="start recording, then tap this")
+    s.add_argument("--after", metavar="Q", help="start recording, then wait for this to appear")
+    s.add_argument("--key", metavar="NAME", help="start recording, then press this key")
+    s.add_argument("--el", metavar="Q", help="measure inside this element (default: whole screen)")
+    s.add_argument("--region", type=parse_box, metavar="L,T,R,B")
+    s.add_argument("--for", dest="seconds", type=float, default=1.5, help="seconds to keep recording after the trigger")
+    s.add_argument("--slow", type=float, metavar="N", help="run animations N times slower while recording")
+    s.add_argument("--label", help="name this run for `motion compare`")
+    s.add_argument("--confirm", action="store_true", help="allow --tap on a write action")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("motion-compare", help="table of recorded motion runs")
+    s.add_argument("labels", nargs="*")
+    s.add_argument("--last", type=int, default=10)
+
     s = sub.add_parser("perf", help="frame timing, compile modes, traces, ANRs")
     ps = s.add_subparsers(dest="perf_cmd", required=True)
     f = ps.add_parser("frames", help="reset gfxinfo, swipe the list back and forth, print the frame summary")
@@ -236,6 +251,20 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
         print(f"{r['path']}  {w}x{h}  {r['kb']} KB  ≈{r['tokens']} tokens")
     elif a.cmd == "perf":
         perf_dispatch(d, a)
+    elif a.cmd == "motion":
+        import json
+
+        from . import motion
+
+        r = motion.record(d, a.tap, a.after, a.key, a.el, a.region, a.seconds, a.slow, a.label, a.confirm)
+        if a.json:
+            print(json.dumps({k: v for k, v in r.items() if not k.startswith("_")}, ensure_ascii=False))
+        else:
+            print("\n".join(motion.format_report(r)))
+    elif a.cmd == "motion-compare":
+        from . import motion
+
+        print("\n".join(motion.compare_lines(motion.history(d, a.labels or None, a.last))))
     elif a.cmd == "log":
         for ln in d.log(a.n, a.grep, a.level):
             print(ln)

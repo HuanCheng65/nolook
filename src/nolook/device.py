@@ -44,6 +44,7 @@ class Device:
             self.u2 = u2.connect(cfg.serial) if cfg.serial else u2.connect()
         except Exception as e:  # noqa: BLE001 - u2 raises many kinds
             raise NolookError(f"cannot connect to {cfg.serial or 'the default device'}: {e}") from e
+        _retry_stale_connections(self.u2)
         self.serial = self.u2.serial
         self.size = self.u2.window_size()
         self.dir = cache_dir(self.serial)
@@ -300,6 +301,28 @@ class Device:
         except (ConnectionError, OSError):
             time.sleep(0.5)
             return self.u2.shell(cmd, timeout=timeout).output
+
+
+def _retry_stale_connections(dev) -> None:
+    # The device server closes idle keep-alive connections; the next request
+    # then fails with RemoteDisconnected before the server saw it, so sending
+    # it once more is safe.
+    import http.client
+
+    from uiautomator2.core import BasicUiautomatorServer
+
+    if getattr(BasicUiautomatorServer, "_nolook_retry", False):
+        return
+    orig = BasicUiautomatorServer.jsonrpc_call
+
+    def call(self, *args, **kwargs):
+        try:
+            return orig(self, *args, **kwargs)
+        except http.client.RemoteDisconnected:
+            return orig(self, *args, **kwargs)
+
+    BasicUiautomatorServer.jsonrpc_call = call
+    BasicUiautomatorServer._nolook_retry = True
 
 
 def _sig(ns: list[Node]) -> list:
