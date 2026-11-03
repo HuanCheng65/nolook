@@ -151,7 +151,15 @@ nolook perf compare [A B …]        # table of recorded runs
 nolook perf compile speed|verify|speed-profile|reset   # then relaunch the app
 nolook perf reset … nolook perf read                   # measure your own interaction
 nolook perf anr                    # last ANR: header and main-thread stack
+nolook trace summary out/x.pftrace # read a trace: jank types, worst frames, thread time, GC, binder
+nolook trace sql out/x.pftrace "select name, sum(dur) from slice group by name order by 2 desc limit 10"
 ```
+
+Never open a trace file yourself; `trace summary` reads it with Perfetto's
+trace processor (fetched on first use) and prints a page. It tells whether
+jank is the app missing deadlines (main or render thread) or the pipeline
+stuffed (render thread / GPU behind), and what ran inside the worst frames.
+Durations in `sql` are nanoseconds.
 
 Swipes fling at `--speed` px/s (default 10000, a quick flick); `--duration
 0.25` reproduces a 250 ms `input swipe`. The summary prints the speed the

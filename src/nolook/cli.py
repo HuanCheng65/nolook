@@ -123,6 +123,17 @@ def build() -> argparse.ArgumentParser:
 
     sub.add_parser("flows", help="list the project's flows")
 
+    s = sub.add_parser("trace", help="summarise a Perfetto trace (no device needed)")
+    ts = s.add_subparsers(dest="trace_cmd", required=True)
+    t = ts.add_parser("summary", help="frames, jank causes, where the main thread's time went, GC, binder")
+    t.add_argument("file")
+    t.add_argument("--package", help="app process (default: .nolook.toml's, else the one with most frames)")
+    t.add_argument("--top", type=int, default=8, help="slices per thread")
+    t = ts.add_parser("sql", help="run a trace processor SQL query")
+    t.add_argument("file")
+    t.add_argument("query")
+    t.add_argument("--limit", type=int, default=40)
+
     s = sub.add_parser("topng", help=argparse.SUPPRESS)  # for the Claude Code pane: it draws PNGs only
     s.add_argument("src")
     s.add_argument("dst")
@@ -189,6 +200,21 @@ def main(argv: list[str] | None = None) -> int:
         if a.width and img.width > a.width:
             img = img.resize((a.width, round(img.height * a.width / img.width)))
         img.save(a.dst, "PNG")
+        return 0
+
+    if a.cmd == "trace":
+        from . import tracing
+
+        try:
+            lines = (
+                tracing.summary(a.file, a.package or cfg.package, a.top)
+                if a.trace_cmd == "summary"
+                else tracing.sql(a.file, a.query, a.limit)
+            )
+        except NolookError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print("\n".join(lines))
         return 0
 
     if a.cmd == "flows":
