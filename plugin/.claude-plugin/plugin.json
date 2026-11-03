@@ -1,6 +1,6 @@
 {
   "name": "nolook",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Drive Android apps through their UI tree instead of screenshots: text snapshots, query taps, Python flows, small crops on demand.",
   "author": {
     "name": "HuanCheng65"
@@ -13,5 +13,7 @@
     "testing",
     "devices"
   ],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/HuanCheng65/nolook",
+  "repository": "https://github.com/HuanCheng65/nolook"
 }
