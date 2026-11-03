@@ -54,7 +54,7 @@ def build() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="nolook",
         description="Drive an Android device by what is on screen. Queries: @e12 (ref), #tag (id), "
-        "~part (contains), /regex/, plain text (exact); prefix a role to narrow: btn:回复.",
+        "~part (contains), /regex/, plain text (exact); prefix a role to narrow: btn:Save.",
     )
     p.add_argument("--serial", help="device serial (default: .nolook.toml, then the only device)")
     p.add_argument("-q", "--quiet", action="store_true", help="print the action line only, no changes")
@@ -137,7 +137,7 @@ def build() -> argparse.ArgumentParser:
     t.add_argument("query")
     t.add_argument("--limit", type=int, default=40)
 
-    s = sub.add_parser("topng", help=argparse.SUPPRESS)  # for the Claude Code pane: it draws PNGs only
+    s = sub.add_parser("topng")  # for the Claude Code pane, which draws PNGs only; left out of --help below
     s.add_argument("src")
     s.add_argument("dst", nargs="?", help="default: beside src, as .png")
     s.add_argument("--width", type=int)
@@ -183,6 +183,7 @@ def build() -> argparse.ArgumentParser:
     c.add_argument("mode", help="speed, speed-profile, verify, quicken, or reset")
     c = ps.add_parser("anr", help="the last ANR's header and main thread stack")
     c.add_argument("-n", type=int, default=40)
+    sub._choices_actions = [a for a in sub._choices_actions if a.dest != "topng"]
     return p
 
 
