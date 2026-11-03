@@ -38,6 +38,9 @@ class FakeDevice:
         self.cur = self.links.get(n.label, self.cur)
         return Outcome(n, before, self.nodes(), 0.1, [])
 
+    def explain(self, msg):
+        return msg
+
     def wait(self, q, gone=False, timeout=10.0):
         ns = self.nodes()
         if bool(tree.match(ns, q)) == gone:
@@ -165,3 +168,13 @@ def test_bare_assert_reports_its_line(tmp_path: Path, capsys, monkeypatch):
     f.write_text('assert d.sees("Home")\nassert d.sees("Saved")\n')
     assert flow_mod.run_flow(cfg, str(f), []) == 1
     assert 'line 2): assert failed: assert d.sees("Saved")' in capsys.readouterr().out
+
+
+def test_slow_waits_are_flagged(capsys):
+    d = SlowDevice({"loading": [], "page": ["Open"]}, {}, "loading", "page", 4)
+    f = flow_mod.Flow(d)
+    f.slow_wait = 0.2
+    f.tap("Open")
+    out = capsys.readouterr().out
+    assert "waited" in out and "⚠ slow" in out
+    assert f.slow_waits and f.slow_waits[0][0] == "tap 'Open'"

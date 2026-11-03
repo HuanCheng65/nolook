@@ -149,15 +149,18 @@ class Locator:
         if q is not None:
             return self(q).tap(confirm=confirm, force=force, timeout=timeout)
         n, _ = self._flow._locate(self, timeout, uncovered=not force)
-        return self._flow._step(f"tap {self!r}", self._flow._d.tap(n.ref, force=force, confirm=confirm))
+        waited = self._flow._waited
+        return self._flow._step(f"tap {self!r}", self._flow._d.tap(n.ref, force=force, confirm=confirm), waited)
 
     def long_tap(self, confirm: bool = False, timeout: float | None = None) -> Step:
         n, _ = self._flow._locate(self, timeout)
-        return self._flow._step(f"long-press {self!r}", self._flow._d.tap(n.ref, long=True, confirm=confirm))
+        waited = self._flow._waited
+        return self._flow._step(f"long-press {self!r}", self._flow._d.tap(n.ref, long=True, confirm=confirm), waited)
 
     def type(self, text: str, append: bool = False, timeout: float | None = None) -> Step:
         n, _ = self._flow._locate(self, timeout)
-        return self._flow._step(f"type {text[:20]!r} into {self!r}", self._flow._d.type(text, n.ref, append=append))
+        waited = self._flow._waited
+        return self._flow._step(f"type {text[:20]!r} into {self!r}", self._flow._d.type(text, n.ref, append=append), waited)
 
     def scroll(self, direction: str = "down", until: str | None = None, max_swipes: int = 10) -> Step:
         n, _ = self._flow._locate(self)
@@ -174,7 +177,7 @@ class Locator:
 
     def wait(self, timeout: float | None = None) -> Locator:
         n, _ = self._flow._locate(self, timeout, uncovered=False)
-        self._flow._log(f"wait {self!r}", extra=f"→ {n.ref}")
+        self._flow._log(f"wait {self!r}", extra=f"→ {n.ref} ({self._flow._waited:.1f}s)")
         return self
 
     def gone(self, timeout: float | None = None) -> None:
@@ -195,15 +198,19 @@ class Locator:
 class Measure:
     """`with d.measure("label") as m:`; m.result holds the frame summary afterwards."""
 
-    def __init__(self, flow: Flow, label: str | None):
+    def __init__(self, flow: Flow, label: str | None, allow_debuggable: bool = False):
         self._flow = flow
         self.label = label
+        self.allow_debuggable = allow_debuggable
         self.result: dict = {}
+        self.debuggable = False
 
     def __enter__(self) -> Measure:
         from . import perf
 
-        perf.reset(self._flow._d)
+        d = self._flow._d
+        self.debuggable = perf.check_build(d, perf._pkg(d, None), self.allow_debuggable)
+        perf.reset(d)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -211,7 +218,7 @@ class Measure:
             return
         from . import perf
 
-        rec = {"label": self.label or "", **perf.read(self._flow._d)}
+        rec = {"label": self.label or "", "debuggable": self.debuggable, "nolook": perf._version(), **perf.read(self._flow._d)}
         self._flow._d._record_perf(rec)
         self.result = rec
         self._flow._log(f"measure {self.label or ''}".strip(), extra="→ " + perf.format_record(rec))
@@ -224,6 +231,10 @@ class Flow:
         self.guard_hits: list[str] = []
         self.results: dict = {}
         self.timeout = DEFAULT_TIMEOUT
+        # A wait longer than this is flagged: auto-waiting must not hide a page that got slower.
+        self.slow_wait = 2.0
+        self.slow_waits: list[tuple[str, float]] = []
+        self._waited = 0.0
         self._dismiss: list[tuple[str, str | None]] = []
 
     # Output -----------------------------------------------------------------
@@ -243,8 +254,14 @@ class Flow:
             line += f" {extra}"
         print(line)
 
-    def _step(self, verb: str, o: Outcome) -> Step:
-        self._log(verb, o)
+    def _step(self, verb: str, o: Outcome, waited: float = 0.0) -> Step:
+        extra = ""
+        if waited >= min(0.5, self.slow_wait):
+            extra = f"· waited {waited:.1f}s for it"
+            if waited >= self.slow_wait:
+                extra += " ⚠ slow"
+                self.slow_waits.append((verb, waited))
+        self._log(verb, o, extra)
         return Step(self._watch(o))
 
     # Finding, with waiting ---------------------------------------------------
@@ -263,6 +280,7 @@ class Flow:
             try:
                 n = loc._resolve(ns)
                 if not (uncovered and n.covered):
+                    self._waited = time.monotonic() - start
                     return n, ns
                 why = f"{tree.format_node(n, compact=True)} is covered"
             except Ambiguous:
@@ -272,7 +290,7 @@ class Flow:
             if self._watch_once(ns) is not None:
                 continue
             if time.monotonic() - start > timeout:
-                raise NoMatch(f"after {timeout:g}s: {why}")
+                raise NoMatch(self._d.explain(f"after {timeout:g}s: {why}"))
             time.sleep(0.15)
 
     # Interruptions ------------------------------------------------------------
@@ -359,7 +377,7 @@ class Flow:
 
     def wait(self, q: str, timeout: float = 10.0) -> Node:
         n, _ = self._locate(Locator(self, q), timeout, uncovered=False)
-        self._log(f"wait {q!r}", extra=f"→ {n.ref}")
+        self._log(f"wait {q!r}", extra=f"→ {n.ref} ({self._waited:.1f}s)")
         return n
 
     def gone(self, q: str, timeout: float = 10.0) -> None:
@@ -373,17 +391,19 @@ class Flow:
     # Measuring -------------------------------------------------------------------
 
     def frames(self, label: str | None = None, rounds: int = 4, within: str | None = None, speed: float = 10000,
-               duration: float | None = None, gap: float = 0.8, axis: str = "y", trace: str | None = None) -> dict:
-        """perf frames: fling the list back and forth and summarise frame timing."""
+               duration: float | None = None, gap: float = 0.8, axis: str = "y", trace: str | None = None,
+               runs: int = 3, allow_debuggable: bool = False) -> dict:
+        """perf frames: `runs` times, fling the list back and forth; median and range of the frame timing."""
         from . import perf
 
-        rec = perf.frames(self._d, rounds, within, duration, gap, axis, label, trace, speed=speed)
+        rec = perf.frames(self._d, rounds, within, duration, gap, axis, label, trace, speed=speed,
+                          runs=runs, allow_debuggable=allow_debuggable)
         self._log(f"frames {label or ''}".strip(), extra="→ " + perf.format_record(rec))
         return rec
 
-    def measure(self, label: str | None = None) -> Measure:
-        """Frame timing of whatever runs inside the `with` block."""
-        return Measure(self, label)
+    def measure(self, label: str | None = None, allow_debuggable: bool = False) -> Measure:
+        """Frame timing of whatever runs inside the `with` block (one run: repeat the block for a spread)."""
+        return Measure(self, label, allow_debuggable)
 
     def motion(self, tap: str | None = None, key: str | None = None, after: str | None = None, el: str | None = None,
                region: tuple[int, int, int, int] | None = None, seconds: float = 1.5, slow: float | None = None,
@@ -512,6 +532,9 @@ def run_flow(cfg: Config, name: str, args: list[str]) -> int:
         sys.path.remove(str(path.resolve().parent))
     took = round(time.monotonic() - start, 1)
     warn = f" · ⚠ {len(flow.guard_hits)} guard hits" if flow.guard_hits else ""
+    if flow.slow_waits:
+        verb, worst = max(flow.slow_waits, key=lambda x: x[1])
+        warn += f" · ⚠ {len(flow.slow_waits)} steps waited over {flow.slow_wait:g}s (longest {worst:.1f}s: {verb})"
     print(f"done · {flow.steps} steps · {took}s{warn}")
     _print_results(flow)
     return 0

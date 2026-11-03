@@ -78,7 +78,33 @@ class Device:
 
     def find(self, q: str, nth: int | None = None) -> tuple[Node, list[Node]]:
         ns = self.nodes()
-        return tree.resolve(ns, q, nth), ns
+        try:
+            return tree.resolve(ns, q, nth), ns
+        except tree.NoMatch as e:
+            raise tree.NoMatch(self.explain(str(e))) from None
+
+    def interruption(self) -> str | None:
+        """Why the app may not be showing what a step expects: screen off, locked, another app in front."""
+        try:
+            power = self._shell(["dumpsys", "power"])
+            m = re.search(r"mWakefulness=(\w+)", power)
+            if m and m.group(1) != "Awake":
+                return f"the screen is off ({m.group(1).lower()})"
+            win = self._shell(["dumpsys", "window"])
+            if re.search(r"(isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|isStatusBarKeyguard)=true", win):
+                return "the device is locked"
+            if self.cfg.package:
+                acts = self._shell(["dumpsys", "activity", "activities"])
+                m = re.search(r"(?:topResumedActivity|mResumedActivity)[=:] ?ActivityRecord\{\S+ \S+ ([\w.]+)/", acts)
+                if m and m.group(1) != self.cfg.package:
+                    return f"{m.group(1)} is in front, not {self.cfg.package}"
+        except Exception:  # noqa: BLE001 - a diagnosis must never hide the original error
+            return None
+        return None
+
+    def explain(self, msg: str) -> str:
+        why = self.interruption()
+        return f"{msg}\nlikely why: {why}" if why else msg
 
     def exists(self, q: str) -> bool:
         return bool(tree.match(self.nodes(), q))
