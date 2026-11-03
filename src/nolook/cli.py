@@ -108,6 +108,7 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("--region", type=parse_box, metavar="L,T,R,B")
     s.add_argument("--width", type=int, help="longest edge in px (default 540 whole screen, 900 crops)")
     s.add_argument("--full", action="store_true", help="native resolution PNG")
+    s.add_argument("--png", action="store_true", help="PNG at the small size instead of JPEG")
     s.add_argument("-o", "--out", metavar="PATH")
 
     s = sub.add_parser("log", help="recent logcat lines of the app")
@@ -120,6 +121,11 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("args", nargs=argparse.REMAINDER)
 
     sub.add_parser("flows", help="list the project's flows")
+
+    s = sub.add_parser("topng", help=argparse.SUPPRESS)  # for the Claude Code pane: it draws PNGs only
+    s.add_argument("src")
+    s.add_argument("dst")
+    s.add_argument("--width", type=int)
 
     s = sub.add_parser("motion", help="record an animation and report its timing, curve and stalls")
     s.add_argument("--tap", metavar="Q", help="start recording, then tap this")
@@ -169,6 +175,15 @@ def main(argv: list[str] | None = None) -> int:
     cfg = find_config()
     if a.serial:
         cfg.serial = a.serial
+
+    if a.cmd == "topng":
+        from PIL import Image
+
+        img = Image.open(a.src)
+        if a.width and img.width > a.width:
+            img = img.resize((a.width, round(img.height * a.width / img.width)))
+        img.save(a.dst, "PNG")
+        return 0
 
     if a.cmd == "flows":
         from .flow import list_flows
@@ -246,7 +261,7 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
     elif a.cmd == "launch":
         report("launch", d.launch(a.package, a.fresh), q)
     elif a.cmd == "shot":
-        r = d.shot(a.query, a.region, a.width, a.full, a.out)
+        r = d.shot(a.query, a.region, a.width, a.full, a.out, a.png)
         w, h = r["size"]
         print(f"{r['path']}  {w}x{h}  {r['kb']} KB  ≈{r['tokens']} tokens")
     elif a.cmd == "perf":

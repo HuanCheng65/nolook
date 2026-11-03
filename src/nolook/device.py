@@ -223,7 +223,7 @@ class Device:
 
     # Pixels -----------------------------------------------------------------
 
-    def shot(self, q: str | None = None, region: tuple[int, int, int, int] | None = None, width: int | None = None, full: bool = False, out: str | None = None) -> dict:
+    def shot(self, q: str | None = None, region: tuple[int, int, int, int] | None = None, width: int | None = None, full: bool = False, out: str | None = None, png: bool = False) -> dict:
         img = self.u2.screenshot()
         label = "screen"
         if q is not None:
@@ -247,10 +247,10 @@ class Device:
         shots = self.dir / "shots"
         shots.mkdir(exist_ok=True)
         _prune(shots, keep=200)
-        ext = "full.png" if full else "jpg"
+        ext = "full.png" if full else "png" if png else "jpg"
         slug = re.sub(r"[^\w-]+", "-", label)[:24].strip("-") or "shot"
         path = Path(out) if out else shots / f"{time.strftime('%H%M%S')}-{slug}.{ext}"
-        if full:
+        if full or png:
             img.save(path, "PNG")
         else:
             img.convert("RGB").save(path, "JPEG", quality=72)
