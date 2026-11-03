@@ -85,11 +85,11 @@ def read(d: Device, package: str | None = None) -> dict[str, float]:
 
 
 def swipes(d: Device, rounds: int, within: str | None, duration: float | None, gap: float, axis: str = "y", speed: float = 10000) -> dict:
-    """Each round: one swipe forward, one back. Returns what was asked and what happened.
+    """Each round: one swipe forward, one back. Returns the gesture used.
 
-    A swipe moves at one speed and lets go at it, so it flings at about that
-    speed. The device paces each step at 5 ms or more, so the speed reached is
-    measured rather than assumed.
+    Swipes go through `input swipe`, which times the gesture on the device.
+    uiautomator's own swipe paces its steps from the host and ran up to nine
+    times slower than asked on an emulator, so it could not fling.
     """
     ns = d.nodes()
     box = d._scroll_box(ns, within)
@@ -103,24 +103,14 @@ def swipes(d: Device, rounds: int, within: str | None, duration: float | None, g
         fwd = (cx + half, cy, cx - half, cy)
     back = (fwd[2], fwd[3], fwd[0], fwd[1])
     dist = 2 * half
-    planned = duration if duration else dist / speed
-    steps = max(2, int(planned * 200))
-    took = []
+    ms = max(16, round((duration if duration else dist / speed) * 1000))
+    n = 0
     for _ in range(rounds):
         for x1, y1, x2, y2 in (fwd, back):
-            t0 = time.monotonic()
-            d.u2.swipe(x1, y1, x2, y2, steps=steps)
-            took.append(time.monotonic() - t0)
+            d._shell(["input", "swipe", *(str(round(v)) for v in (x1, y1, x2, y2)), str(ms)])
+            n += 1
             time.sleep(gap)
-    real = sorted(took)[len(took) // 2]
-    return {
-        "swipes": len(took),
-        "swipe_px": round(dist),
-        "swipe_ms": round(planned * 1000),
-        "swipe_ms_real": round(real * 1000),
-        "speed_px_s": round(dist / planned),
-        "speed_px_s_real": round(dist / real) if real else None,
-    }
+    return {"swipes": n, "swipe_px": round(dist), "swipe_ms": ms, "speed_px_s": round(dist * 1000 / ms)}
 
 
 def frames(
@@ -171,8 +161,8 @@ def format_record(rec: dict, keys: list[str] = SHORT) -> str:
 
     head = f"[{rec['label']}] " if rec.get("label") else ""
     tail = f" · compile {rec['compile']}" if rec.get("compile") else ""
-    if rec.get("speed_px_s_real"):
-        tail += f" · swipes {rec['swipe_px']}px at {rec['speed_px_s_real']}px/s (asked {rec['speed_px_s']})"
+    if rec.get("swipe_ms"):
+        tail += f" · swipes {rec['swipe_px']}px in {rec['swipe_ms']}ms ({rec['speed_px_s']}px/s)"
     return head + " · ".join(fmt(k) for k in keys) + tail
 
 
@@ -189,7 +179,7 @@ def history(d: Device, labels: list[str] | None = None, last: int = 10) -> list[
 def compare_table(recs: list[dict], keys: list[str] = SHORT) -> list[str]:
     if not recs:
         return ["no runs recorded yet (nolook perf frames --label …)"]
-    cols = ["label"] + keys + ["compile", "speed_px_s_real"]
+    cols = ["label"] + keys + ["compile", "speed_px_s"]
     rows = [[str(r.get(c, "")) if r.get(c) is not None else "-" for c in cols] for r in recs]
     widths = [max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(cols)]
     line = lambda cells: "  ".join(c.rjust(w) if i else c.ljust(w) for i, (c, w) in enumerate(zip(cells, widths)))  # noqa: E731
