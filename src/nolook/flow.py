@@ -32,11 +32,67 @@ class FlowFailed(Exception):
     pass
 
 
+class Step:
+    """What one action did: its target, and what appeared and disappeared.
+
+    Attributes it does not have are the target's, so `d.tap(q).ref` still works.
+    """
+
+    def __init__(self, o: Outcome):
+        self.target = o.target
+        self.before = o.before
+        self.after = o.after
+        self.settled = o.settled
+        self.guard_hits = o.guard_hits
+        lines, self.changed = tree.delta(o.before, o.after)
+        old = {n.ref for n in o.before}
+        new = {n.ref for n in o.after}
+        self.added = [n for n in o.after if n.ref not in old]
+        self.removed = [n for n in o.before if n.ref not in new]
+
+    def shows(self, q: str) -> bool:
+        """Whether the screen after the action has an element matching q."""
+        return bool(tree.match(self.after, q))
+
+    def __getattr__(self, name: str):
+        target = self.__dict__.get("target")
+        if target is None:
+            raise AttributeError(name)
+        return getattr(target, name)
+
+
+class Measure:
+    """`with d.measure("label") as m:`; m.result holds the frame summary afterwards."""
+
+    def __init__(self, flow: "Flow", label: str | None):
+        self._flow = flow
+        self.label = label
+        self.result: dict = {}
+
+    def __enter__(self) -> "Measure":
+        from . import perf
+
+        perf.reset(self._flow._d)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is not None:
+            return
+        from . import perf
+
+        rec = {"label": self.label or "", **perf.read(self._flow._d)}
+        self._flow._d._record_perf(rec)
+        self.result = rec
+        self._flow._log(f"measure {self.label or ''}".strip(), extra="→ " + perf.format_record(rec))
+
+
 class Flow:
     def __init__(self, d: Device):
         self._d = d
         self.steps = 0
         self.guard_hits: list[str] = []
+        self.results: dict = {}
+        self._dismiss: list[tuple[str, str | None]] = []
 
     def _log(self, verb: str, o: Outcome | None = None, extra: str = "") -> None:
         self.steps += 1
@@ -53,54 +109,130 @@ class Flow:
             line += f" {extra}"
         print(line)
 
-    # Actions: same names and meanings as the CLI.
+    def _step(self, verb: str, o: Outcome) -> Step:
+        self._log(verb, o)
+        o = self._watch(o)
+        return Step(o)
 
-    def tap(self, q: str, nth: int | None = None, force: bool = False, confirm: bool = False) -> Node:
-        o = self._d.tap(q, nth, force=force, confirm=confirm)
-        self._log(f"tap {q!r}", o)
-        return o.target  # type: ignore[return-value]
+    # Interruptions ---------------------------------------------------------------
 
-    def long_tap(self, q: str, nth: int | None = None) -> Node:
-        o = self._d.tap(q, nth, long=True)
-        self._log(f"long-press {q!r}", o)
-        return o.target  # type: ignore[return-value]
+    def dismiss_when(self, q: str, tap: str | None = None) -> None:
+        """After every action and while waiting: if q shows, tap `tap` (default q) to close it."""
+        self._dismiss.append((q, tap))
 
-    def tap_xy(self, x: int, y: int) -> None:
-        self._log(f"tap ({x},{y})", self._d.tap_xy(x, y))
+    def _watch(self, o: Outcome) -> Outcome:
+        # A dialog may stack on another; three rounds is plenty and stops a loop.
+        for _ in range(3):
+            hit = self._watch_once(o.after)
+            if hit is None:
+                return o
+            o = Outcome(o.target, o.before, hit.after, hit.settled, o.guard_hits + hit.guard_hits)
+        return o
 
-    def type(self, text: str, into: str | None = None, append: bool = False) -> None:
-        self._log(f"type {text[:20]!r}", self._d.type(text, into, append=append))
+    def _watch_once(self, ns: list[Node]) -> Outcome | None:
+        for q, tap in self._dismiss:
+            if not [n for n in tree.match(ns, q) if not n.covered]:
+                continue
+            target = tap or q
+            hit = self._d.tap(target)
+            print(f"  · dismissed {q!r} by tapping {target!r}")
+            return hit
+        return None
 
-    def key(self, name: str) -> None:
-        self._log(f"key {name}", self._d.key(name))
+    # Actions: same names and meanings as the CLI. Each returns a Step.
 
-    def back(self) -> None:
-        self.key("back")
+    def tap(self, q: str, nth: int | None = None, force: bool = False, confirm: bool = False) -> Step:
+        return self._step(f"tap {q!r}", self._d.tap(q, nth, force=force, confirm=confirm))
 
-    def scroll(self, direction: str = "down", within: str | None = None, until: str | None = None, max_swipes: int = 10) -> Node | None:
-        o = self._d.scroll(direction, within, until, max_swipes)
-        self._log(f"scroll {direction}" + (f" until {until!r}" if until else ""), o)
-        return o.target
+    def long_tap(self, q: str, nth: int | None = None, confirm: bool = False) -> Step:
+        return self._step(f"long-press {q!r}", self._d.tap(q, nth, long=True, confirm=confirm))
 
-    def open(self, uri: str) -> None:
-        self._log(f"open {uri}", self._d.open(uri))
+    def tap_xy(self, x: int, y: int) -> Step:
+        return self._step(f"tap ({x},{y})", self._d.tap_xy(x, y))
 
-    def launch(self, package: str | None = None, fresh: bool = False) -> None:
-        self._log("launch" + (" fresh" if fresh else ""), self._d.launch(package, fresh))
+    def type(self, text: str, into: str | None = None, append: bool = False) -> Step:
+        return self._step(f"type {text[:20]!r}", self._d.type(text, into, append=append))
+
+    def key(self, name: str) -> Step:
+        return self._step(f"key {name}", self._d.key(name))
+
+    def back(self) -> Step:
+        return self.key("back")
+
+    def scroll(self, direction: str = "down", within: str | None = None, until: str | None = None, max_swipes: int = 10) -> Step:
+        return self._step(f"scroll {direction}" + (f" until {until!r}" if until else ""), self._d.scroll(direction, within, until, max_swipes))
+
+    def open(self, uri: str) -> Step:
+        return self._step(f"open {uri}", self._d.open(uri))
+
+    def launch(self, package: str | None = None, fresh: bool = False) -> Step:
+        return self._step("launch" + (" fresh" if fresh else ""), self._d.launch(package, fresh))
 
     def wait(self, q: str, timeout: float = 10.0) -> Node:
-        ns, took = self._d.wait(q, timeout=timeout)
+        ns, took = self._wait(q, gone=False, timeout=timeout)
         self._log(f"wait {q!r}", extra=f"({took}s)")
         return tree.match(ns, q)[0]
 
     def gone(self, q: str, timeout: float = 10.0) -> None:
-        _, took = self._d.wait(q, gone=True, timeout=timeout)
+        _, took = self._wait(q, gone=True, timeout=timeout)
         self._log(f"gone {q!r}", extra=f"({took}s)")
+
+    def _wait(self, q: str, gone: bool, timeout: float) -> tuple[list[Node], float]:
+        if not self._dismiss:
+            return self._d.wait(q, gone=gone, timeout=timeout)
+        # Poll here rather than in Device, so an interruption is closed on the way.
+        start = time.monotonic()
+        while True:
+            ns = self._d.nodes()
+            if bool(tree.match(ns, q)) != gone:
+                return ns, round(time.monotonic() - start, 2)
+            if self._watch_once(ns) is None and time.monotonic() - start > timeout:
+                state = "still there" if gone else "never appeared"
+                raise NolookError(f"{q!r} {state} after {timeout:g}s")
+            time.sleep(0.15)
 
     def shot(self, q: str | None = None, region: tuple[int, int, int, int] | None = None, width: int | None = None, full: bool = False) -> str:
         r = self._d.shot(q, region, width, full)
         self._log(f"shot {q or ('region' if region else 'screen')}", extra=f"→ {r['path']} {r['size'][0]}x{r['size'][1]} ≈{r['tokens']} tok")
         return r["path"]
+
+    # Measuring -------------------------------------------------------------------
+
+    def frames(self, label: str | None = None, rounds: int = 4, within: str | None = None, speed: float = 10000,
+               duration: float | None = None, gap: float = 0.8, axis: str = "y", trace: str | None = None) -> dict:
+        """perf frames: fling the list back and forth and summarise frame timing."""
+        from . import perf
+
+        rec = perf.frames(self._d, rounds, within, duration, gap, axis, label, trace, speed=speed)
+        self._log(f"frames {label or ''}".strip(), extra="→ " + perf.format_record(rec))
+        return rec
+
+    def measure(self, label: str | None = None) -> Measure:
+        """Frame timing of whatever runs inside the `with` block."""
+        return Measure(self, label)
+
+    def motion(self, tap: str | None = None, key: str | None = None, after: str | None = None, el: str | None = None,
+               region: tuple[int, int, int, int] | None = None, seconds: float = 1.5, slow: float | None = None,
+               label: str | None = None, confirm: bool = False) -> dict:
+        """nolook motion: record around a trigger and measure the animation."""
+        from . import motion
+
+        r = motion.record(self._d, tap, after, key, el, region, seconds, slow, label, confirm)
+        r = {k: v for k, v in r.items() if not k.startswith("_")}
+        if r.get("moved"):
+            summary = f"{r['duration_ms']}ms · 90% at {r['t90_ms']}ms · {r['shape']} · " + ("monotonic" if r["monotonic"] else "reverses")
+        else:
+            summary = "no motion"
+        self._log(f"motion {label or tap or key or after or ''}".strip(), extra=f"→ {summary} · sheet {r.get('sheet')}")
+        return r
+
+    def compile(self, mode: str) -> str:
+        """Set the ART compile mode (speed, verify, …) and stop the app; launch it again before measuring."""
+        from . import perf
+
+        status = perf.compile(self._d, mode)
+        self._log(f"compile {mode}", extra=f"→ {status or 'unknown'}")
+        return status
 
     # Reads: no output line, for branching.
 
@@ -120,11 +252,17 @@ class Flow:
     def log(self, lines: int = 40, grep: str | None = None) -> list[str]:
         return self._d.log(lines, grep)
 
+    # Control and output ----------------------------------------------------------
+
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
     def note(self, msg: str) -> None:
         print(f"  · {msg}")
+
+    def result(self, **values) -> None:
+        """Values to hand back: printed as one JSON line when the flow ends, also on failure."""
+        self.results.update(values)
 
     def check(self, cond: bool, msg: str) -> None:
         if not cond:
@@ -168,16 +306,26 @@ def run_flow(cfg: Config, name: str, args: list[str]) -> int:
     except (NolookError, QueryError, FlowFailed, AssertionError) as e:
         line = _flow_line(e, path)
         print(f"  ✗ step {flow.steps + 1}" + (f" (line {line})" if line else "") + f": {e}")
+        _print_results(flow)
         _dump_failure(d)
         return 1
     except Exception:  # noqa: BLE001 - a bug in the flow itself
         print("  ✗ the flow raised:")
         traceback.print_exc(file=sys.stdout)
+        _print_results(flow)
         return 1
     took = round(time.monotonic() - start, 1)
     warn = f" · ⚠ {len(flow.guard_hits)} guard hits" if flow.guard_hits else ""
     print(f"done · {flow.steps} steps · {took}s{warn}")
+    _print_results(flow)
     return 0
+
+
+def _print_results(flow: Flow) -> None:
+    if flow.results:
+        import json
+
+        print("result " + json.dumps(flow.results, ensure_ascii=False, default=str))
 
 
 def _flow_line(e: BaseException, path: Path) -> int | None:

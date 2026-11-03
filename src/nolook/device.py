@@ -221,7 +221,18 @@ class Device:
         if fresh:
             self._shell(["am", "force-stop", pkg])
         ns = self.nodes()
-        return self._act(ns, None, lambda: self._shell(["am", "start", "-n", comp]), settle)
+        mark = self._device_time()
+        self._shell(["am", "start", "-n", comp])
+        # A starting app shows nothing for a moment, and nothing is stable too:
+        # wait for the app's own elements before waiting for them to settle.
+        start = time.monotonic()
+        while time.monotonic() - start < settle * 2:
+            if any(n.pkg == pkg for n in self.nodes()):
+                break
+            time.sleep(SETTLE_POLL)
+        after, took = self.settle(settle)
+        took = None if took is None else round(time.monotonic() - start, 2)
+        return Outcome(None, ns, after, took, self._guard(mark))
 
     # Pixels -----------------------------------------------------------------
 
@@ -262,6 +273,10 @@ class Device:
             "kb": round(path.stat().st_size / 1024),
             "tokens": round(img.width * img.height / 750),
         }
+
+    def _record_perf(self, rec: dict) -> None:
+        with (self.dir / "perf.jsonl").open("a") as f:
+            f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "serial": self.serial, **rec}, ensure_ascii=False) + "\n")
 
     # Logs -------------------------------------------------------------------
 
