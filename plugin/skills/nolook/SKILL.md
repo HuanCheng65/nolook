@@ -106,7 +106,11 @@ What to know:
 - **Actions wait for their target** (5 s by default, `d.timeout = …`): until
   it is on screen, matches once and is not covered. Write `wait` only to wait
   for a result that is not the next thing you act on. A query that matches
-  several fails at once.
+  several fails at once. Each step prints how long it waited when that took
+  noticeable time, flags waits over `d.slow_wait` (2 s) with ⚠, and the flow's
+  last line counts them: a page that got slower still shows.
+- **When a step fails** because nothing matches, nolook says whether the
+  screen is off, the device locked, or another app in front.
 - **Locators**: `d(q)` names an element and finds it again each time it is
   used. `d("#sheet")("OK")` or `d("#sheet").tap("OK")` looks only inside
   `#sheet`; `.first()`, `[i]`, `.all()`, `.count()` pick among matches;
@@ -169,30 +173,45 @@ report says it was still moving when recording stopped, raise `--for`.
 ## Performance
 
 ```
-nolook perf frames --label A       # reset gfxinfo, swipe the list back and forth, summarise
+nolook perf frames --label A       # 3 runs: reset gfxinfo, fling the list, read; median and range
+nolook perf frames --label B       # change one thing between labels
+nolook perf compare A B            # pooled per label; says when a difference is within noise
 nolook perf frames --trace out/    # same, with a Perfetto trace saved to out/
-nolook perf compare [A B …]        # table of recorded runs
 nolook perf compile speed|verify|speed-profile|reset   # then relaunch the app
-nolook perf reset … nolook perf read                   # measure your own interaction
+nolook perf reset … nolook perf read                   # measure your own interaction (one run)
+nolook perf stack [--seconds 3]    # what the main thread spends CPU in, now (a hang that spins)
 nolook perf anr                    # last ANR: header and main-thread stack
 nolook trace summary out/x.pftrace # read a trace: jank types, worst frames, thread time, GC, binder
 nolook trace sql out/x.pftrace "select name, sum(dur) from slice group by name order by 2 desc limit 10"
 ```
+
+Rules that keep conclusions honest:
+
+- **One run is not a result.** `perf frames` runs 3 times by default
+  (`--runs`) and prints the median with the range in brackets. Before you
+  say one setting is faster, run `perf compare`: it calls a difference
+  "within noise" when the ranges overlap, and "cannot tell" with fewer than
+  3 runs a side.
+- **Compare like with like.** Records carry the gesture (distance, duration,
+  rounds) and nolook's version; `compare` warns when they differ. Keep
+  `--speed` / `--duration` / `--rounds` the same across labels.
+- **Measure release builds.** nolook refuses a debuggable build (its frame
+  times run several times slower); `--allow-debuggable` measures anyway and
+  marks the result. Measure on a real device; emulator frame times say little.
+- **Hangs.** If the app freezes, run `perf stack` while it is frozen: if the
+  main thread is on the CPU all the time, the frames it lists are the loop;
+  if it is mostly off the CPU, it is waiting, and `perf anr` shows on what
+  once the system declares an ANR. `perf stack` needs a debuggable app, or a
+  release with `<profileable android:shell="true"/>` on Android 10+.
+
+Swipes are `input swipe` gestures timed on the device, flung at `--speed`
+px/s (default 10000, a quick flick); `--duration 0.25` gives a 250 ms swipe.
 
 Never open a trace file yourself; `trace summary` reads it with Perfetto's
 trace processor (fetched on first use) and prints a page. It tells whether
 jank is the app missing deadlines (main or render thread) or the pipeline
 stuffed (render thread / GPU behind), and what ran inside the worst frames.
 Durations in `sql` are nanoseconds.
-
-Swipes are `input swipe` gestures timed on the device, flung at `--speed`
-px/s (default 10000, a quick flick); `--duration 0.25` gives a 250 ms swipe
-whatever the distance. The summary prints the gesture used.
-
-The summary is janky % (new and legacy), p50/p90/p99 frame time, GPU p90,
-slow UI thread and missed-deadline counts, plus the compile mode. Measure on
-a real device; emulator frame times say little. Change one thing between
-labelled runs.
 
 ## Safety
 
