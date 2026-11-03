@@ -162,18 +162,17 @@ def build() -> argparse.ArgumentParser:
     ps = s.add_subparsers(dest="perf_cmd", required=True)
     f = ps.add_parser("frames", help="reset gfxinfo, swipe the list back and forth, print the frame summary")
     f.add_argument("--runs", type=int, default=3, help="measure this many times and report the median and range (default 3)")
-    f.add_argument("--rounds", type=int, default=4, help="forward+back swipe pairs per run (default 4)")
-    f.add_argument("--warmup", type=int, default=1, help="runs to fling first and not keep, while the app's code warms up (default 1)")
-    f.add_argument("--allow-debuggable", action="store_true", help="measure a debuggable build anyway (its numbers are not representative)")
-    f.add_argument("--in", dest="within", metavar="Q", help="list to swipe (default: the largest)")
-    f.add_argument("--speed", type=float, default=10000, help="swipe speed in px/s, which it flings at (default 10000, a quick flick)")
-    f.add_argument("--duration", type=float, help="seconds per swipe instead of --speed (0.25 matches `input swipe … 250`)")
-    f.add_argument("--gap", type=float, default=0.8, help="seconds between swipes")
-    f.add_argument("--axis", choices=["y", "x"], default="y")
     f.add_argument("--label", help="name this run for `perf compare`")
     f.add_argument("--trace", metavar="PATH", help="also record a Perfetto trace to this file or directory")
-    f.add_argument("--all", action="store_true", help="print every gfxinfo counter")
-    f.add_argument("--json", action="store_true")
+    _fling_args(f)
+    f = ps.add_parser("ab", help="measure A and B in turns (A B B A …), running a command to switch before each")
+    f.add_argument("--a", dest="switch_a", required=True, metavar="CMD", help="host shell command that sets up A and leaves the list on screen")
+    f.add_argument("--b", dest="switch_b", required=True, metavar="CMD", help="the same for B")
+    f.add_argument("--label-a", default="A")
+    f.add_argument("--label-b", default="B")
+    f.add_argument("--cycles", type=int, default=3, help="A+B pairs; each side gets this many runs (default 3; 5 to confirm a difference)")
+    f.add_argument("--runs", type=int, default=1, help="runs per turn (default 1)")
+    _fling_args(f)
     ps.add_parser("reset", help="reset gfxinfo counters (then act, then `perf read`)")
     r = ps.add_parser("read", help="frame summary since the last reset")
     r.add_argument("--label")
@@ -194,6 +193,19 @@ def build() -> argparse.ArgumentParser:
     c.add_argument("-n", type=int, default=40)
     sub._choices_actions = [a for a in sub._choices_actions if a.dest != "topng"]
     return p
+
+
+def _fling_args(f: argparse.ArgumentParser) -> None:
+    f.add_argument("--rounds", type=int, default=4, help="forward+back swipe pairs per run (default 4)")
+    f.add_argument("--warmup", type=int, default=1, help="runs to fling first and not keep, while the app's code warms up (default 1)")
+    f.add_argument("--allow-debuggable", action="store_true", help="measure a debuggable build anyway (its numbers are not representative)")
+    f.add_argument("--in", dest="within", metavar="Q", help="list to swipe (default: the largest)")
+    f.add_argument("--speed", type=float, default=10000, help="swipe speed in px/s, which it flings at (default 10000, a quick flick)")
+    f.add_argument("--duration", type=float, help="seconds per swipe instead of --speed (0.25 matches `input swipe … 250`)")
+    f.add_argument("--gap", type=float, default=0.8, help="seconds between swipes")
+    f.add_argument("--axis", choices=["y", "x"], default="y")
+    f.add_argument("--all", action="store_true", help="print every gfxinfo counter")
+    f.add_argument("--json", action="store_true")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -359,6 +371,14 @@ def perf_dispatch(d: Device, a: argparse.Namespace) -> None:
         print(json.dumps(rec, ensure_ascii=False) if a.json else perf.format_record(rec, keys))
         if rec.get("trace") and not a.json:
             print(f"trace: {rec['trace']}  (open in ui.perfetto.dev)")
+    elif a.perf_cmd == "ab":
+        recs = perf.ab(d, a.switch_a, a.switch_b, a.label_a, a.label_b, a.cycles,
+                       on_turn=lambda r: print(json.dumps(r, ensure_ascii=False) if a.json else perf.format_record(r, keys), flush=True),
+                       rounds=a.rounds, within=a.within, duration=a.duration, gap=a.gap, axis=a.axis, speed=a.speed,
+                       runs=a.runs, allow_debuggable=a.allow_debuggable, warmup=a.warmup)
+        if not a.json:
+            for ln in perf.compare_table(recs, keys):
+                print(ln)
     elif a.perf_cmd == "reset":
         perf.reset(d)
         print("gfxinfo reset")

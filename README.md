@@ -167,6 +167,7 @@ for devices that record few frames.
 nolook perf frames --label before        # gfxinfo reset → flings → summary
 nolook perf frames --label after --trace traces/
 nolook perf compare
+nolook perf ab --a "adb install -r a.apk && nolook run open-feed" --b "adb install -r b.apk && nolook run open-feed"   # A B B A …
 nolook trace summary traces/nolook-….pftrace
 nolook perf compile speed                # ART compile mode, then relaunch
 nolook perf anr

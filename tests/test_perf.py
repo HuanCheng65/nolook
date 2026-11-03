@@ -41,3 +41,56 @@ def test_compare_warns_when_gestures_differ():
 def test_too_few_runs_cannot_tell():
     lines = perf.compare_table([rec("a", [40.0]), rec("b", [30.0])])
     assert any("cannot tell" in ln for ln in lines)
+
+
+def test_parse_heat_reads_temperature_status_and_cpu_cap():
+    text = "  temperature: 312\nThermal Status: 1\ncap\n1900800\n1900800\n1497600\nmax\n1900800\n1900800\n2457600\n"
+    assert perf.parse_heat(text) == {"temp": 31.2, "thermal": 1, "cpu_cap": 61}
+
+
+def test_parse_heat_skips_what_the_device_does_not_report():
+    assert perf.parse_heat("  temperature: 250\ncap\nmax\n") == {"temp": 25.0}
+
+
+def hot(label, temp, cap=100):
+    r = rec(label, [40.0, 41.0, 42.0])
+    r["heat"] = [{"temp": temp, "cpu_cap": cap}] * 3
+    return r
+
+
+def test_compare_warns_when_the_later_label_ran_hotter():
+    lines = perf.compare_table([hot("a", 30.0), hot("b", 33.0, cap=80)])
+    warn = [ln for ln in lines if ln.startswith("⚠ b was measured after a")]
+    assert warn and "3.0°C warmer" in warn[0] and "CPU capped at 80%" in warn[0] and "perf ab" in warn[0]
+
+
+def test_compare_does_not_warn_when_runs_were_interleaved():
+    lines = perf.compare_table([hot("a", 30.0), hot("b", 33.0), hot("a", 33.0)])
+    assert not any("measured after" in ln for ln in lines)
+
+
+def test_ab_alternates_abba_and_switches_before_each_turn(monkeypatch, tmp_path):
+    order = []
+    monkeypatch.setattr(perf, "frames", lambda d, label, **kw: order.append(label) or {"label": label})
+
+    class D:
+        serial = "x"
+
+    log = tmp_path / "switches"
+    perf.ab(D(), f"echo a >> {log}", f"echo b >> {log}", cycles=3)
+    assert order == ["A", "B", "B", "A", "A", "B"]
+    assert log.read_text().split() == ["a", "b", "b", "a", "a", "b"]
+
+
+def test_ab_stops_when_a_switch_fails(monkeypatch):
+    monkeypatch.setattr(perf, "frames", lambda d, label, **kw: {"label": label})
+
+    class D:
+        serial = "x"
+
+    try:
+        perf.ab(D(), "true", "echo nope >&2; exit 3")
+    except perf.NolookError as e:
+        assert "switching to B failed (exit 3)" in str(e) and "nope" in str(e)
+    else:
+        raise AssertionError("expected a failure")

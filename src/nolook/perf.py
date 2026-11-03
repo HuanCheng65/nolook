@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import shlex
+import subprocess
 import time
 from pathlib import Path
 
@@ -117,6 +119,39 @@ def swipes(d: Device, rounds: int, within: str | None, duration: float | None, g
     return {"swipes": n, "swipe_px": round(dist), "swipe_ms": ms, "speed_px_s": round(dist * 1000 / ms)}
 
 
+_HEAT = (
+    "dumpsys battery | grep -m1 'temperature:'; dumpsys thermalservice 2>/dev/null | grep -m1 'Thermal Status:'; "
+    "echo cap; cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq 2>/dev/null; "
+    "echo max; cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq 2>/dev/null"
+)
+
+
+def heat(d: Device) -> dict:
+    """How warm the device is: battery °C, thermal status (Android 10+), and the most
+    capped CPU's top frequency as a percent of its maximum (100: not throttled)."""
+    try:
+        return parse_heat(d._shell(["sh", "-c", _HEAT]))
+    except Exception:  # noqa: BLE001 - a missing reading must not stop a measurement
+        return {}
+
+
+def parse_heat(text: str) -> dict:
+    out: dict = {}
+    m = re.search(r"temperature: (\d+)", text)
+    if m:
+        out["temp"] = int(m.group(1)) / 10
+    m = re.search(r"Thermal Status: (\d+)", text)
+    if m:
+        out["thermal"] = int(m.group(1))
+    m = re.search(r"^cap\n(.*?)^max\n(.*)", text, re.M | re.S)
+    if m:
+        caps, maxes = (re.findall(r"^(\d+)$", g, re.M) for g in m.groups())
+        ratios = [int(c) / int(x) for c, x in zip(caps, maxes) if int(x) > 0]
+        if ratios and len(caps) == len(maxes):
+            out["cpu_cap"] = round(min(ratios) * 100)
+    return out
+
+
 def is_debuggable(d: Device, pkg: str) -> bool:
     out = d._shell(["dumpsys", "package", pkg])
     m = re.search(r"pkgFlags=\[([^\]]*)\]", out)
@@ -174,11 +209,13 @@ def frames(
     tracer = _start_trace(d, pkg, est_ms) if trace else None
     samples = []
     gesture: dict = {}
+    heats = []
     for _ in range(max(1, runs)):
         reset(d, pkg)
         gesture = swipes(d, rounds, within, duration, gap, axis, speed)
         time.sleep(0.5)
         samples.append(read(d, pkg))
+        heats.append(heat(d))
     rec = {
         "label": label or "",
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -190,6 +227,7 @@ def frames(
         "warmup": max(0, warmup),
         "compile": compile_status(d, pkg),
         "debuggable": dbg,
+        "heat": heats,
         **summarise(samples),
     }
     if tracer:
@@ -231,11 +269,14 @@ def format_record(rec: dict, keys: list[str] = SHORT) -> str:
         rng = f" ({min(spread)}–{max(spread)})" if len(spread) > 1 and min(spread) != max(spread) else ""
         return f"{k} {v}{_unit(k)}{rng}"
 
+    hs = [h for h in rec.get("heat") or [] if h]
     runs = rec.get("runs", 1)
     head = (f"[{rec['label']}] " if rec.get("label") else "") + (f"median of {runs} runs · " if runs > 1 else "1 run · ")
     tail = f" · compile {rec['compile']}" if rec.get("compile") else ""
     if rec.get("debuggable"):
         tail += " · ⚠ DEBUGGABLE build"
+    if hs:
+        tail += f" · {_heat_cell(hs)}"
     if rec.get("swipe_ms"):
         tail += f" · swipes {rec['swipe_px']}px in {rec['swipe_ms']}ms ({rec['speed_px_s']}px/s)"
     return head + " · ".join(fmt(k) for k in keys) + tail
@@ -259,7 +300,8 @@ def _groups(recs: list[dict]) -> dict[str, dict]:
     """Records with one label pooled: their runs together, if they used one gesture."""
     groups: dict[str, dict] = {}
     for r in recs:
-        g = groups.setdefault(r.get("label") or "(no label)", {"values": {}, "gestures": set(), "compile": set(), "debuggable": False, "n": 0})
+        g = groups.setdefault(r.get("label") or "(no label)", {"values": {}, "gestures": set(), "compile": set(), "debuggable": False, "n": 0, "heat": []})
+        g["heat"].extend(h for h in r.get("heat") or [] if h)
         vals = r.get("values") or {k: [r[k]] for k, _ in _FIELDS if k in r}
         for k, v in vals.items():
             g["values"].setdefault(k, []).extend(v)
@@ -270,12 +312,55 @@ def _groups(recs: list[dict]) -> dict[str, dict]:
     return groups
 
 
+def _heat_cell(hs: list[dict]) -> str:
+    temps = [h["temp"] for h in hs if "temp" in h]
+    caps = [h["cpu_cap"] for h in hs if "cpu_cap" in h]
+    parts = [f"{_median(temps)}°C"] if temps else []
+    if caps and min(caps) < 100:
+        parts.append(f"cpu cap {min(caps)}%")
+    if any(h.get("thermal") for h in hs):
+        parts.append(f"thermal {max(h.get('thermal', 0) for h in hs)}")
+    return " ".join(parts) or "-"
+
+
+def _blocks(recs: list[dict]) -> bool:
+    """Whether each label's records came one after another, none interleaved with another's."""
+    seen: list[str] = []
+    for r in recs:
+        name = r.get("label") or "(no label)"
+        if not seen or seen[-1] != name:
+            if name in seen:
+                return False
+            seen.append(name)
+    return len(seen) >= 2
+
+
+def _hotter(base: dict, other: dict) -> str | None:
+    """Why `other` ran on a warmer or more throttled device than `base`, if it did."""
+    def med(g: dict, k: str):
+        v = [h[k] for h in g["heat"] if k in h]
+        return _median(v) if v else None
+
+    why = []
+    ta, tb = med(base, "temp"), med(other, "temp")
+    if ta is not None and tb is not None and tb - ta >= 1.5:
+        why.append(f"{tb - ta:.1f}°C warmer")
+    ca, cb = med(base, "cpu_cap"), med(other, "cpu_cap")
+    if ca is not None and cb is not None and ca - cb >= 5:
+        why.append(f"CPU capped at {cb}% against {ca}%")
+    sa, sb = med(base, "thermal"), med(other, "thermal")
+    if sa is not None and sb is not None and sb > sa:
+        why.append(f"thermal status {sb} against {sa}")
+    return ", ".join(why) or None
+
+
 def compare_table(recs: list[dict], keys: list[str] = SHORT, verdict: list[str] = VERDICT) -> list[str]:
     """One row per label (its runs pooled): median and range; then each label against the first."""
     if not recs:
         return ["no runs recorded yet (nolook perf frames --label …)"]
     groups = _groups(recs)
-    cols = ["label", "runs"] + keys + ["compile"]
+    has_heat = any(g["heat"] for g in groups.values())
+    cols = ["label", "runs"] + keys + ["compile"] + (["device"] if has_heat else [])
 
     def cell(g: dict, k: str) -> str:
         v = g["values"].get(k)
@@ -284,7 +369,8 @@ def compare_table(recs: list[dict], keys: list[str] = SHORT, verdict: list[str] 
         med = _median(v)
         return f"{med}" if min(v) == max(v) else f"{med} [{min(v)}–{max(v)}]"
 
-    rows = [[name, str(g["n"]), *(cell(g, k) for k in keys), "/".join(sorted(g["compile"]))] for name, g in groups.items()]
+    rows = [[name, str(g["n"]), *(cell(g, k) for k in keys), "/".join(sorted(g["compile"])),
+             *([_heat_cell(g["heat"])] if has_heat else [])] for name, g in groups.items()]
     widths = [max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(cols)]
     line = lambda cells: "  ".join(c.rjust(w) if i else c.ljust(w) for i, (c, w) in enumerate(zip(cells, widths)))  # noqa: E731
     out = [line(cols)] + [line(r) for r in rows]
@@ -297,6 +383,12 @@ def compare_table(recs: list[dict], keys: list[str] = SHORT, verdict: list[str] 
         out.append(f"⚠ different gestures ({desc}): these rows are not comparable; measure again with one gesture")
     if any(g["debuggable"] for g in groups.values()):
         out.append("⚠ some runs are of a debuggable build; their frame times are not representative")
+    if _blocks(recs):
+        for a, b in zip(names, names[1:]):
+            why = _hotter(groups[a], groups[b])
+            if why:
+                out.append(f"⚠ {b} was measured after {a} and the device ran {why}: {b} is at a disadvantage; "
+                           "alternate them with `perf ab`")
     if len(names) >= 2:
         base = groups[names[0]]
         out.append(f"against {names[0]}:")
@@ -331,6 +423,39 @@ def _verdict(a: list, b: list) -> str:
     if odds < 50:
         return f"{ma}→{mb} likely {word} (no overlap, which chance gives 1 in {odds} at {len(a)} vs {len(b)} runs: 5 runs a side to confirm)"
     return f"{ma}→{mb} {word} (no overlap; by chance under 1 in 50)"
+
+
+def ab(
+    d: Device,
+    switch_a: str,
+    switch_b: str,
+    label_a: str = "A",
+    label_b: str = "B",
+    cycles: int = 3,
+    on_turn=None,
+    **frames_args,
+) -> list[dict]:
+    """Measure A and B in turns, A B B A A B …, switching with a host command before each turn.
+
+    A device warms up and throttles over a session, so whichever is measured
+    later runs slower; alternating spreads that over both, and the ABBA order
+    also cancels a steady drift. Each turn is one `frames` record (its own
+    warm-up first, since a switch often restarts the app).
+    """
+    env = {**os.environ, "ANDROID_SERIAL": d.serial, "NOLOOK_SERIAL": d.serial}
+    turns = [(label_a, switch_a), (label_b, switch_b)]
+    recs = []
+    for i in range(max(1, cycles)):
+        for label, cmd in turns if i % 2 == 0 else turns[::-1]:
+            done = subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True)
+            if done.returncode != 0:
+                tail = (done.stderr or done.stdout).strip().splitlines()[-3:]
+                raise NolookError(f"switching to {label} failed (exit {done.returncode}): {cmd}\n" + "\n".join(tail))
+            rec = frames(d, label=label, **frames_args)
+            recs.append(rec)
+            if on_turn:
+                on_turn(rec)
+    return recs
 
 
 # Compile modes ----------------------------------------------------------------

@@ -128,6 +128,7 @@ sheet (not read): ~/.cache/nolook/…/shots/012554-motion.jpg
 nolook perf frames --label before        # 重置 gfxinfo → 反复滑动 → 汇总
 nolook perf frames --label after --trace traces/
 nolook perf compare
+nolook perf ab --a "adb install -r a.apk && nolook run open-feed" --b "adb install -r b.apk && nolook run open-feed"   # 交替测 A B B A …
 nolook trace summary traces/nolook-….pftrace
 nolook perf compile speed                # 切换 ART 编译模式，之后重新启动应用
 nolook perf anr
