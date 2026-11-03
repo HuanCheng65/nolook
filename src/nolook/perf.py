@@ -113,6 +113,33 @@ def swipes(d: Device, rounds: int, within: str | None, duration: float | None, g
     return {"swipes": n, "swipe_px": round(dist), "swipe_ms": ms, "speed_px_s": round(dist * 1000 / ms)}
 
 
+def is_debuggable(d: Device, pkg: str) -> bool:
+    out = d._shell(["dumpsys", "package", pkg])
+    m = re.search(r"pkgFlags=\[([^\]]*)\]", out)
+    return bool(m and "DEBUGGABLE" in m.group(1))
+
+
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("nolook")
+    except Exception:  # noqa: BLE001 - a source checkout has no metadata
+        return "dev"
+
+
+def check_build(d: Device, pkg: str, allow_debuggable: bool) -> bool:
+    """Refuse a debuggable build: its frame times run several times slower and mislead."""
+    dbg = is_debuggable(d, pkg)
+    if dbg and not allow_debuggable:
+        raise NolookError(
+            f"{pkg} is a debuggable build: ART runs it with checks that slow it down, so its frame times "
+            "do not say how the release behaves. Install a release (or benchmark) build, "
+            "or pass --allow-debuggable to measure anyway."
+        )
+    return dbg
+
+
 def frames(
     d: Device,
     rounds: int = 4,
@@ -124,22 +151,36 @@ def frames(
     trace: str | None = None,
     package: str | None = None,
     speed: float = 10000,
+    runs: int = 3,
+    allow_debuggable: bool = False,
 ) -> dict:
+    """Measure `runs` times (reset, fling `rounds` times, read) and keep every run.
+
+    One run is one sample: frame timing on a phone varies by several points
+    between identical runs, so a single number invites a wrong conclusion.
+    """
     pkg = _pkg(d, package)
-    est_ms = int(rounds * 2 * ((duration or 0.3) + gap) * 1000) + 3000
+    dbg = check_build(d, pkg, allow_debuggable)
+    est_ms = runs * (int(rounds * 2 * ((duration or 0.3) + gap) * 1000) + 1500) + 3000
     tracer = _start_trace(d, pkg, est_ms) if trace else None
-    reset(d, pkg)
-    gesture = swipes(d, rounds, within, duration, gap, axis, speed)
-    time.sleep(0.5)
-    stats = read(d, pkg)
+    samples = []
+    gesture: dict = {}
+    for _ in range(max(1, runs)):
+        reset(d, pkg)
+        gesture = swipes(d, rounds, within, duration, gap, axis, speed)
+        time.sleep(0.5)
+        samples.append(read(d, pkg))
     rec = {
         "label": label or "",
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "serial": d.serial,
         "package": pkg,
+        "nolook": _version(),
         **gesture,
+        "rounds": rounds,
         "compile": compile_status(d, pkg),
-        **stats,
+        "debuggable": dbg,
+        **summarise(samples),
     }
     if tracer:
         rec["trace"] = _stop_trace(d, tracer, trace)
@@ -148,19 +189,43 @@ def frames(
     return rec
 
 
+def summarise(samples: list[dict]) -> dict:
+    """Median of each counter at the top level (as one run's record has them), plus every run's values."""
+    values = {k: [s[k] for s in samples if k in s] for k, _ in _FIELDS}
+    values = {k: v for k, v in values.items() if v}
+    out: dict = {"runs": len(samples), "values": values}
+    for k, v in values.items():
+        out[k] = _median(v)
+    return out
+
+
+def _median(v: list) -> float:
+    v = sorted(v)
+    m = len(v) // 2
+    mid = v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2
+    return round(mid, 2) if isinstance(mid, float) else mid
+
+
+def _unit(k: str) -> str:
+    return "%" if k in ("janky", "janky_legacy") else "ms" if (k.startswith("p") or k.startswith("gpu_")) else ""
+
+
 def format_record(rec: dict, keys: list[str] = SHORT) -> str:
+    vals = rec.get("values") or {}
+
     def fmt(k: str) -> str:
         v = rec.get(k)
         if v is None:
             return f"{k} -"
-        if k in ("janky", "janky_legacy"):
-            return f"{k} {v}%"
-        if k.startswith("p") or k.startswith("gpu_"):
-            return f"{k} {v}ms"
-        return f"{k} {v}"
+        spread = vals.get(k, [])
+        rng = f" ({min(spread)}–{max(spread)})" if len(spread) > 1 and min(spread) != max(spread) else ""
+        return f"{k} {v}{_unit(k)}{rng}"
 
-    head = f"[{rec['label']}] " if rec.get("label") else ""
+    runs = rec.get("runs", 1)
+    head = (f"[{rec['label']}] " if rec.get("label") else "") + (f"median of {runs} runs · " if runs > 1 else "1 run · ")
     tail = f" · compile {rec['compile']}" if rec.get("compile") else ""
+    if rec.get("debuggable"):
+        tail += " · ⚠ DEBUGGABLE build"
     if rec.get("swipe_ms"):
         tail += f" · swipes {rec['swipe_px']}px in {rec['swipe_ms']}ms ({rec['speed_px_s']}px/s)"
     return head + " · ".join(fmt(k) for k in keys) + tail
@@ -176,14 +241,76 @@ def history(d: Device, labels: list[str] | None = None, last: int = 10) -> list[
     return recs[-last:]
 
 
+def _gesture(r: dict) -> tuple:
+    return (r.get("swipe_px"), r.get("swipe_ms"), r.get("rounds"))
+
+
+def _groups(recs: list[dict]) -> dict[str, dict]:
+    """Records with one label pooled: their runs together, if they used one gesture."""
+    groups: dict[str, dict] = {}
+    for r in recs:
+        g = groups.setdefault(r.get("label") or "(no label)", {"values": {}, "gestures": set(), "compile": set(), "debuggable": False, "n": 0})
+        vals = r.get("values") or {k: [r[k]] for k, _ in _FIELDS if k in r}
+        for k, v in vals.items():
+            g["values"].setdefault(k, []).extend(v)
+        g["gestures"].add(_gesture(r))
+        g["compile"].add(r.get("compile") or "?")
+        g["debuggable"] |= bool(r.get("debuggable"))
+        g["n"] += r.get("runs", 1)
+    return groups
+
+
 def compare_table(recs: list[dict], keys: list[str] = SHORT) -> list[str]:
+    """One row per label (its runs pooled): median and range; then each label against the first."""
     if not recs:
         return ["no runs recorded yet (nolook perf frames --label …)"]
-    cols = ["label"] + keys + ["compile", "speed_px_s"]
-    rows = [[str(r.get(c, "")) if r.get(c) is not None else "-" for c in cols] for r in recs]
+    groups = _groups(recs)
+    cols = ["label", "runs"] + keys + ["compile"]
+
+    def cell(g: dict, k: str) -> str:
+        v = g["values"].get(k)
+        if not v:
+            return "-"
+        med = _median(v)
+        return f"{med}" if min(v) == max(v) else f"{med} [{min(v)}–{max(v)}]"
+
+    rows = [[name, str(g["n"]), *(cell(g, k) for k in keys), "/".join(sorted(g["compile"]))] for name, g in groups.items()]
     widths = [max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(cols)]
     line = lambda cells: "  ".join(c.rjust(w) if i else c.ljust(w) for i, (c, w) in enumerate(zip(cells, widths)))  # noqa: E731
-    return [line(cols)] + [line(r) for r in rows]
+    out = [line(cols)] + [line(r) for r in rows]
+
+    names = list(groups)
+    gestures = {name: g["gestures"] for name, g in groups.items()}
+    all_g = set().union(*gestures.values())
+    if len(all_g) > 1:
+        desc = "; ".join(f"{n}: " + ", ".join(f"{px}px/{ms}ms×{rd}" for px, ms, rd in sorted(gs, key=str)) for n, gs in gestures.items())
+        out.append(f"⚠ different gestures ({desc}): these rows are not comparable; measure again with one gesture")
+    if any(g["debuggable"] for g in groups.values()):
+        out.append("⚠ some runs are of a debuggable build; their frame times are not representative")
+    if len(names) >= 2:
+        base = groups[names[0]]
+        out.append(f"against {names[0]}:")
+        for name in names[1:]:
+            parts = []
+            for k in ("janky", "p90", "p99"):
+                a, b = base["values"].get(k), groups[name]["values"].get(k)
+                if not a or not b:
+                    continue
+                parts.append(f"{k} {_verdict(a, b)}")
+            out.append(f"  {name}: " + " · ".join(parts))
+    return out
+
+
+def _verdict(a: list, b: list) -> str:
+    """Whether b differs from a beyond the spread of either."""
+    ma, mb = _median(a), _median(b)
+    if len(a) < 3 or len(b) < 3:
+        return f"{ma}→{mb} (fewer than 3 runs each: cannot tell)"
+    if max(a) < min(b):
+        return f"{ma}→{mb} higher (no overlap)"
+    if max(b) < min(a):
+        return f"{ma}→{mb} lower (no overlap)"
+    return f"{ma}→{mb} within noise (ranges overlap)"
 
 
 # Compile modes ----------------------------------------------------------------
@@ -266,3 +393,75 @@ def last_anr(d: Device, package: str | None = None, lines: int = 40) -> list[str
             break
         stack.append(ln)
     return head + stack[:lines]
+
+
+# What the main thread is doing now -----------------------------------------------
+
+_JAVA = re.compile(r"^[\w$]+(\.[\w$<>-]+)+$")
+# Frames every main-thread stack passes through; they say nothing about a hang.
+_ENTRY = ("android.app.ActivityThread.", "android.os.Looper.", "android.os.Handler.", "com.android.internal.os.",
+          "java.lang.reflect.", "dalvik.system.", "android.view.Choreographer$FrameDisplayEventReceiver.run",
+          "android.view.Choreographer$CallbackRecord.run", "android.view.Choreographer.doCallbacks",
+          "androidx.compose.ui.platform.AndroidUiDispatcher", "kotlinx.coroutines.DispatchedTask.run",
+          "kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith")
+
+
+def _cpu_ticks(d: Device, pid: str) -> int | None:
+    # utime + stime of the main thread, in clock ticks (fields 14 and 15 of stat).
+    stat = d._shell(["cat", f"/proc/{pid}/task/{pid}/stat"]).strip()
+    if ")" not in stat:
+        return None
+    fields = stat.rsplit(")", 1)[1].split()
+    try:
+        return int(fields[11]) + int(fields[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def stack(d: Device, seconds: float = 3.0, top: int = 15, package: str | None = None) -> list[str]:
+    """Sample the main thread with simpleperf: which Java code it spent its CPU in.
+
+    For a hang that spins (a loop, CPU at 100%) this names the code at once,
+    without waiting for an ANR. It needs a debuggable or profileable app
+    (Android 10+: `<profileable android:shell="true"/>`).
+    """
+    pkg = _pkg(d, package)
+    pid = d._shell(["pidof", pkg]).strip().split(" ")[0]
+    if not pid:
+        raise NolookError(f"{pkg} is not running")
+    data = "/data/local/tmp/nolook-stack.data"
+    t0, c0 = time.monotonic(), _cpu_ticks(d, pid)
+    rec = d._shell(["sh", "-c", f"simpleperf record --app {pkg} -t {pid} -g --duration {seconds:g} -o {data} 2>&1"], timeout=int(seconds) + 60)
+    if "Samples recorded" not in rec:
+        hint = next((ln for ln in rec.splitlines() if "E " in ln or "rror" in ln), rec.strip()[-200:])
+        raise NolookError(
+            f"simpleperf could not sample {pkg}: {hint.strip()}\n"
+            "It needs a debuggable build, or on Android 10+ a release build with "
+            '<profileable android:shell="true"/> in its manifest.'
+        )
+    c1, t1 = _cpu_ticks(d, pid), time.monotonic()
+    report = d._shell(["sh", "-c", f"simpleperf report -i {data} --children --sort symbol --percent-limit 0.5 2>/dev/null; rm -f {data}"], timeout=120)
+    m = re.search(r"Samples: (\d+)", report)
+    samples = int(m.group(1)) if m else 0
+    # CPU time the thread used over the wall time, from the kernel (100 ticks a second).
+    busy = ((c1 - c0) / 100 / (t1 - t0)) if c0 is not None and c1 is not None and t1 > t0 else None
+    rows = []
+    for ln in report.splitlines():
+        mm = re.match(r"\s*([\d.]+)%\s+([\d.]+)%\s+(\S.*)$", ln)
+        if mm and _JAVA.match(mm.group(3).strip()):
+            rows.append((float(mm.group(1)), float(mm.group(2)), mm.group(3).strip()))
+    own = [r for r in rows if not r[2].startswith(_ENTRY)]
+    on_cpu = f" · on CPU {min(busy, 1):.0%} of the time" if busy is not None else ""
+    out = [f"main thread of {pkg} (pid {pid}) · {seconds:g}s · {samples} samples{on_cpu}"]
+    if busy is not None and busy >= 0.9:
+        out.append("busy all the time: if the app is stuck, it is spinning in the frames below.")
+    elif busy is not None and busy < 0.25:
+        out.append("mostly not on the CPU: it is not spinning. If the app is stuck, the main thread is waiting "
+                   "(a lock, IO, binder); `nolook perf anr` shows what on, once the system declares an ANR.")
+    if not own:
+        out.append("no Java frames of the app in the samples")
+        return out
+    out.append("Java frames by share of main-thread CPU (including what they call):")
+    for children, self_, sym in own[:top]:
+        out.append(f"  {children:5.1f}%  {sym}" + (f"  (self {self_:.1f}%)" if self_ >= 1 else ""))
+    return out
