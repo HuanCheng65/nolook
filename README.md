@@ -120,22 +120,24 @@ several lists them and asks for a ref, a role or `--nth`.
 
 ```python
 """Open a note and check the editor."""
-d.launch(fresh=True)
-d.tap("Groceries")
-if d.exists("Discard draft?"):
-    d.tap("Keep")
-d.check(d.exists("#body"), "editor open")
-d.shot("#toolbar")
+with d.dismissing("Rate us", tap="Not now"):
+    d.launch(fresh=True)
+    d.go("Notes", "Groceries")          # each tap waits for its target
+    step = d("#toolbar").tap("Edit")    # look only inside #toolbar
+    assert step.shows("#body")
+    d.result(title=d("#title").text)    # handed back as one JSON line
 ```
 
 `nolook run open_note` prints one line per step. On failure it prints the
 step and line, the screen at that moment, and the path of a screenshot it
 saved without reading.
 
-Flows can also measure (`d.frames()`, `with d.measure("x"):`, `d.motion(…)`),
-close interruptions on their own (`d.dismiss_when("Rate us", tap="Not now")`),
-branch on what an action changed (`if d.tap("Save").shows("Saved"):`), and
-hand back values as JSON (`d.result(count=3)`).
+Actions wait until their target is on screen and not covered, so flows
+rarely need an explicit wait. `d(q)` is a locator that finds its element
+again each time and can scope a search to a container. Every action returns
+what it changed (`.added`, `.removed`, `.shows(q)`), checks are plain
+`assert`, and flows can measure in place (`d.frames()`,
+`with d.measure("x"):`, `d.motion(…)`, `with d.slow(4):`).
 
 ### Animations
 

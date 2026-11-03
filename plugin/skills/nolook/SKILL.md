@@ -83,58 +83,49 @@ nolook flows                            list the project's saved flows
 ## Several steps: write a flow
 
 When you know the next steps, put them in one flow instead of one command per
-turn. Branches and loops are plain Python; `d` is the device:
+turn. A flow is plain Python with `d`, the device, in scope:
 
 ```python
-"""Opening a note shows the editor, with or without a saved draft."""
-d.open("notes://note/42")
-d.wait("Groceries")
-d.tap("#edit")
-if d.exists("Discard draft?"):
-    d.tap("Keep")
-d.check(d.exists("#body"), "editor open")
-d.shot("#toolbar")
+"""Opening a note shows the editor."""
+with d.dismissing("Rate us", tap="Not now"):      # closes it whenever it shows
+    d.launch(fresh=True)
+    d.go("Notes", "Groceries")                     # tap each in turn
+    step = d("#toolbar").tap("Edit")               # only inside #toolbar
+    assert step.shows("#body")
+    d.result(title=d("#title").text)               # handed back as JSON
 ```
 
 `nolook run path/to/flow.py`. Each step prints one line. On failure it prints
-the failing step and line, the screen at that moment, and the path of a
-screenshot it saved (not read). Flows worth keeping go in the project's flows
-directory (`nolook flows` lists them, with their docstrings), so the next
-session can run them by name.
+the failing step and line (for a bare `assert`, the line itself), the screen
+at that moment, and the path of a screenshot it saved (not read). Flows worth
+keeping go in the project's flows directory (`nolook flows` lists them, with
+their docstrings); a flow can import helpers from the files beside it.
 
-Flow methods:
+What to know:
 
-- Act (one line each), returning a step: `tap long_tap tap_xy type key back
-  scroll open launch`. A step has `.added` and `.removed` (elements),
-  `.changed` (the screen changed wholesale) and `.shows(q)` (whether the
-  screen after it matches q), so a flow can branch on what an action did
-  without reading the screen again. `d.tap(q).ref` still gives the target.
-- Wait: `wait(q, timeout)`, `gone(q, timeout)`.
-- Read, for branching: `exists find text snap log`.
-- Measure: `frames(label=…)` (perf frames), `with d.measure("label"):` around
-  any steps (frame timing of just those), `motion(tap=…, label=…)`,
-  `compile("speed")`. Each prints a summary line and returns a dict.
-- Interruptions: `d.dismiss_when("New version", tap="Later")` near the top.
-  After every action and while waiting, if the first query shows, nolook taps
-  the second (or the first) and prints a line. The write-action guard still
-  applies.
-- Output: `d.result(key=value, …)` collects values; they print as one
-  `result {…}` JSON line at the end, also when the flow fails. Use it to hand
-  back what the flow read instead of printing it with `note`.
-- Control: `check(cond, msg)` and `fail(msg)` stop the flow; `note(msg)`,
-  `sleep(s)`.
-
-```python
-"""Fling the feed with and without the glass effect."""
-d.dismiss_when("New version", tap="Later")
-d.launch(fresh=True)
-d.tap("Feed")
-before = d.frames(label="glass")
-d.tap("Settings"); d.tap("Glass"); d.back()
-d.tap("Feed")
-after = d.frames(label="flat")
-d.result(janky=[before["janky"], after["janky"]])
-```
+- **Actions wait for their target** (5 s by default, `d.timeout = …`): until
+  it is on screen, matches once and is not covered. Write `wait` only to wait
+  for a result that is not the next thing you act on. A query that matches
+  several fails at once.
+- **Locators**: `d(q)` names an element and finds it again each time it is
+  used. `d("#sheet")("OK")` or `d("#sheet").tap("OK")` looks only inside
+  `#sheet`; `.first()`, `[i]`, `.all()`, `.count()` pick among matches;
+  `.text`, `.label`, `.exists()` read; `.tap() .long_tap() .type(t)
+  .scroll(dir, until=q) .fling(times) .wait() .gone() .shot()` act.
+- **Steps**: every action returns what it did: `.added`, `.removed`,
+  `.changed`, `.shows(q)`. Branch on it instead of reading the screen again.
+- **Checks**: `assert d.sees("Saved")` (on screen, not covered); `d.exists(q)`,
+  `d.find(q)`, `d.text(q)`, `d.snap()` read without acting.
+- **Navigation and keys**: `d.go(*labels)`, `d.back()`, `d.key("enter")`,
+  `d.open(uri)`, `d.launch(fresh=True)`, `d.type(text, into=q)`.
+- **Measuring**: `d.frames(label=…)`, `with d.measure("label"):`,
+  `d.motion(tap=q, label=…)`, `with d.slow(4):`, `d.compile("speed")`. Each
+  prints a summary line and returns a dict.
+- **Interruptions**: `with d.dismissing(q, tap=…):` for a block,
+  `d.dismiss_when(q, tap=…)` for the whole flow. The write-action guard still
+  applies to what it taps.
+- **Results**: `d.result(key=value)`; printed as one `result {…}` JSON line
+  at the end, also on failure. Use it to hand back what the flow read.
 
 ## Screenshots
 

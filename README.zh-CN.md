@@ -91,17 +91,17 @@ nolook run flows/open_note.py       # 一次执行多个步骤
 
 ```python
 """打开一条笔记并检查编辑器。"""
-d.launch(fresh=True)
-d.tap("购物清单")
-if d.exists("放弃草稿？"):
-    d.tap("保留")
-d.check(d.exists("#body"), "编辑器已打开")
-d.shot("#toolbar")
+with d.dismissing("给我们评分", tap="以后再说"):
+    d.launch(fresh=True)
+    d.go("笔记", "购物清单")            # 每次点击都会等目标出现
+    step = d("#toolbar").tap("编辑")    # 只在 #toolbar 内查找
+    assert step.shows("#body")
+    d.result(title=d("#title").text)    # 以一行 JSON 返回
 ```
 
 `nolook run open_note` 每一步打印一行。失败时打印失败的步骤和行号、当时的屏幕内容，以及一张已保存但未读取的截图的路径。
 
-flow 还可以直接测量（`d.frames()`、`with d.measure("x"):`、`d.motion(…)`），自动关闭意外弹窗（`d.dismiss_when("给我们评分", tap="以后再说")`），根据某一步操作的结果分支（`if d.tap("保存").shows("已保存"):`），并以 JSON 返回读取到的值（`d.result(count=3)`）。
+每个操作都会等待目标出现在屏幕上且未被遮挡，因此 flow 中很少需要显式等待。`d(q)` 是一个定位器：每次使用时重新查找元素，并可以把查找范围限定在某个容器内。每个操作都会返回它造成的变化（`.added`、`.removed`、`.shows(q)`），检查直接使用 `assert`，还可以在 flow 中直接测量（`d.frames()`、`with d.measure("x"):`、`d.motion(…)`、`with d.slow(4):`）。
 
 ### 动画
 
