@@ -120,6 +120,32 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("args", nargs=argparse.REMAINDER)
 
     sub.add_parser("flows", help="list the project's flows")
+
+    s = sub.add_parser("perf", help="frame timing, compile modes, traces, ANRs")
+    ps = s.add_subparsers(dest="perf_cmd", required=True)
+    f = ps.add_parser("frames", help="reset gfxinfo, swipe the list back and forth, print the frame summary")
+    f.add_argument("--rounds", type=int, default=4, help="forward+back swipe pairs (default 4)")
+    f.add_argument("--in", dest="within", metavar="Q", help="list to swipe (default: the largest)")
+    f.add_argument("--duration", type=float, default=0.25, help="seconds per swipe")
+    f.add_argument("--gap", type=float, default=0.8, help="seconds between swipes")
+    f.add_argument("--axis", choices=["y", "x"], default="y")
+    f.add_argument("--label", help="name this run for `perf compare`")
+    f.add_argument("--trace", metavar="PATH", help="also record a Perfetto trace to this file or directory")
+    f.add_argument("--all", action="store_true", help="print every gfxinfo counter")
+    f.add_argument("--json", action="store_true")
+    ps.add_parser("reset", help="reset gfxinfo counters (then act, then `perf read`)")
+    r = ps.add_parser("read", help="frame summary since the last reset")
+    r.add_argument("--label")
+    r.add_argument("--all", action="store_true")
+    r.add_argument("--json", action="store_true")
+    c = ps.add_parser("compare", help="table of recorded runs")
+    c.add_argument("labels", nargs="*", help="only these labels")
+    c.add_argument("--last", type=int, default=10)
+    c.add_argument("--all", action="store_true", help="every counter as a column")
+    c = ps.add_parser("compile", help="set the ART compile mode and stop the app so it takes effect")
+    c.add_argument("mode", help="speed, speed-profile, verify, quicken, or reset")
+    c = ps.add_parser("anr", help="the last ANR's header and main thread stack")
+    c.add_argument("-n", type=int, default=40)
     return p
 
 
@@ -208,10 +234,39 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
         r = d.shot(a.query, a.region, a.width, a.full, a.out)
         w, h = r["size"]
         print(f"{r['path']}  {w}x{h}  {r['kb']} KB  ≈{r['tokens']} tokens")
+    elif a.cmd == "perf":
+        perf_dispatch(d, a)
     elif a.cmd == "log":
         for ln in d.log(a.n, a.grep, a.level):
             print(ln)
     return 0
+
+
+def perf_dispatch(d: Device, a: argparse.Namespace) -> None:
+    import json
+
+    from . import perf
+
+    keys = [k for k, _ in perf._FIELDS] if getattr(a, "all", False) else perf.SHORT
+    if a.perf_cmd == "frames":
+        rec = perf.frames(d, a.rounds, a.within, a.duration, a.gap, a.axis, a.label, a.trace)
+        print(json.dumps(rec, ensure_ascii=False) if a.json else perf.format_record(rec, keys))
+        if rec.get("trace") and not a.json:
+            print(f"trace: {rec['trace']}  (open in ui.perfetto.dev)")
+    elif a.perf_cmd == "reset":
+        perf.reset(d)
+        print("gfxinfo reset")
+    elif a.perf_cmd == "read":
+        rec = {"label": a.label or "", **perf.read(d)}
+        print(json.dumps(rec, ensure_ascii=False) if a.json else perf.format_record(rec, keys))
+    elif a.perf_cmd == "compare":
+        for ln in perf.compare_table(perf.history(d, a.labels or None, a.last), keys):
+            print(ln)
+    elif a.perf_cmd == "compile":
+        print(f"compile status: {perf.compile(d, a.mode) or 'unknown'} · app stopped; relaunch it before measuring")
+    elif a.perf_cmd == "anr":
+        for ln in perf.last_anr(d, lines=a.n):
+            print(ln)
 
 
 if __name__ == "__main__":

@@ -116,6 +116,22 @@ where to tap.
   need to see it.
 - `--full` gives a native PNG; use it when the detail is the point.
 
+## Performance
+
+```
+nolook perf frames --label A       # reset gfxinfo, swipe the list back and forth, summarise
+nolook perf frames --trace out/    # same, with a Perfetto trace saved to out/
+nolook perf compare [A B …]        # table of recorded runs
+nolook perf compile speed|verify|speed-profile|reset   # then relaunch the app
+nolook perf reset … nolook perf read                   # measure your own interaction
+nolook perf anr                    # last ANR: header and main-thread stack
+```
+
+The summary is janky % (new and legacy), p50/p90/p99 frame time, GPU p90,
+slow UI thread and missed-deadline counts, plus the compile mode. Measure on
+a real device; emulator frame times say little. Change one thing between
+labelled runs.
+
 ## Safety
 
 The app may be logged in to a real account. Taps are by query, so they hit

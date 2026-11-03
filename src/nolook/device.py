@@ -293,8 +293,13 @@ class Device:
             return None
         return self._shell(["pidof", self.cfg.package]).strip().split(" ")[0] or None
 
-    def _shell(self, cmd: list[str]) -> str:
-        return self.u2.shell(cmd).output
+    def _shell(self, cmd: list[str], timeout: int = 60) -> str:
+        # The connection to the device server drops now and then; one retry covers it.
+        try:
+            return self.u2.shell(cmd, timeout=timeout).output
+        except (ConnectionError, OSError):
+            time.sleep(0.5)
+            return self.u2.shell(cmd, timeout=timeout).output
 
 
 def _sig(ns: list[Node]) -> list:
