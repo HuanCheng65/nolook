@@ -59,7 +59,7 @@ def build() -> argparse.ArgumentParser:
     p.add_argument("--serial", help="device serial (default: .nolook.toml, then the only device)")
     p.add_argument("-q", "--quiet", action="store_true", help="print the action line only, no changes")
     p.add_argument("--session", help=argparse.SUPPRESS)  # the device a Claude Code session last drove, for its pane
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
 
     s = sub.add_parser("snap", help="list what is on screen, with refs")
     s.add_argument("--all", action="store_true", help=f"no {SNAP_CAP}-line cap")
