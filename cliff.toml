@@ -1,0 +1,42 @@
+# Release notes from Conventional Commits: `uvx git-cliff` (see scripts/bump.py).
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes, grouped by kind. Generated from commit messages by
+[git-cliff](https://git-cliff.org).
+"""
+body = """
+
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}](https://github.com/HuanCheng65/nolook/releases/tag/{{ version }}) — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }} \
+([{{ commit.id | truncate(length=7, end="") }}](https://github.com/HuanCheng65/nolook/commit/{{ commit.id }}))\
+{% endfor %}
+{% endfor %}"""
+trim = false
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^docs", group = "<!-- 3 -->Documentation" },
+  { message = "^refactor", group = "<!-- 4 -->Refactoring" },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", skip = true },
+]
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+"
+sort_commits = "oldest"
