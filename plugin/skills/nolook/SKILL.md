@@ -194,6 +194,9 @@ Rules that keep conclusions honest:
   3 runs a side. Ranges that do not overlap at 3 against 3 still happen by
   chance 1 time in 10, so it says "likely" until each side has 5 runs; say
   "likely" too. It judges janky, p90, p99 and gpu_p90; `--keys` picks others.
+- **Warm up first.** A freshly started app runs slower until its code is
+  compiled, so `perf frames` flings one run first and keeps nothing from it
+  (`--warmup N`; `0` to skip when the app has been in use).
 - **Compare like with like.** Records carry the gesture (distance, duration,
   rounds) and nolook's version; `compare` warns when they differ. Keep
   `--speed` / `--duration` / `--rounds` the same across labels.

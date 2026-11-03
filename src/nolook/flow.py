@@ -392,12 +392,12 @@ class Flow:
 
     def frames(self, label: str | None = None, rounds: int = 4, within: str | None = None, speed: float = 10000,
                duration: float | None = None, gap: float = 0.8, axis: str = "y", trace: str | None = None,
-               runs: int = 3, allow_debuggable: bool = False) -> dict:
+               runs: int = 3, allow_debuggable: bool = False, warmup: int = 1) -> dict:
         """perf frames: `runs` times, fling the list back and forth; median and range of the frame timing."""
         from . import perf
 
         rec = perf.frames(self._d, rounds, within, duration, gap, axis, label, trace, speed=speed,
-                          runs=runs, allow_debuggable=allow_debuggable)
+                          runs=runs, allow_debuggable=allow_debuggable, warmup=warmup)
         self._log(f"frames {label or ''}".strip(), extra="→ " + perf.format_record(rec))
         return rec
 

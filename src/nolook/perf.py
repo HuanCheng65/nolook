@@ -157,14 +157,19 @@ def frames(
     speed: float = 10000,
     runs: int = 3,
     allow_debuggable: bool = False,
+    warmup: int = 1,
 ) -> dict:
     """Measure `runs` times (reset, fling `rounds` times, read) and keep every run.
 
     One run is one sample: frame timing on a phone varies by several points
     between identical runs, so a single number invites a wrong conclusion.
+    `warmup` runs go first and are not kept: a freshly started app still
+    interprets and JIT-compiles the code they exercise, so its first run is slower.
     """
     pkg = _pkg(d, package)
     dbg = check_build(d, pkg, allow_debuggable)
+    for _ in range(max(0, warmup)):
+        swipes(d, rounds, within, duration, gap, axis, speed)
     est_ms = runs * (int(rounds * 2 * ((duration or 0.3) + gap) * 1000) + 1500) + 3000
     tracer = _start_trace(d, pkg, est_ms) if trace else None
     samples = []
@@ -182,6 +187,7 @@ def frames(
         "nolook": _version(),
         **gesture,
         "rounds": rounds,
+        "warmup": max(0, warmup),
         "compile": compile_status(d, pkg),
         "debuggable": dbg,
         **summarise(samples),
