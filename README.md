@@ -33,3 +33,18 @@ Then in Claude Code:
 
 Backed by [uiautomator2](https://github.com/openatx/uiautomator2); its
 on-device server is pushed on first connect.
+
+## The device pane
+
+In Claude Code the plugin also adds a pane beside the chat that shows the
+device after every nolook command, the last screenshot or motion sheet the
+agent saved, and the last few actions. The pictures go to your terminal
+only; the model never reads them.
+
+`/device` opens it, `/device live` refreshes it every two seconds,
+`/device still` stops that. In the pane, `r` refreshes and `l` toggles live.
+
+It needs a terminal with the kitty graphics protocol (Ghostty, kitty, or
+iTerm2 3.5+). Inside a multiplexer Claude Code may not recognise one: herdr,
+for instance, answers the graphics query but reports itself as
+`libghostty`. Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` there.
