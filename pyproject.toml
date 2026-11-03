@@ -1,0 +1,13 @@
+[project]
+name = "nolook"
+version = "0.1.0"
+description = "Drive an Android device by what is on screen, not by screenshots. Built for coding agents."
+requires-python = ">=3.11"
+dependencies = ["uiautomator2>=3.7", "pillow>=10"]
+
+[project.scripts]
+nolook = "nolook.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
