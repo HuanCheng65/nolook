@@ -88,7 +88,80 @@ def test_results_are_printed_on_success_and_failure(tmp_path: Path, capsys, monk
     assert flow_mod.run_flow(cfg, str(good), []) == 0
     assert 'result {"likes": 915}' in capsys.readouterr().out
     bad = tmp_path / "bad.py"
-    bad.write_text('d.result(seen="list")\nd.tap("Missing")\n')
+    bad.write_text('d.timeout = 0.3\nd.result(seen="list")\nd.tap("Missing")\n')
     assert flow_mod.run_flow(cfg, str(bad), []) == 1
     out = capsys.readouterr().out
-    assert "✗ step 1 (line 2)" in out and 'result {"seen": "list"}' in out
+    assert "✗ step 1 (line 3)" in out and 'result {"seen": "list"}' in out
+
+
+class SlowDevice(FakeDevice):
+    """The screen becomes `later` after `polls` reads, like a page still loading."""
+
+    def __init__(self, screens, links, start, later, polls):
+        super().__init__(screens, links, start)
+        self.later, self.polls = later, polls
+
+    def nodes(self):
+        self.polls -= 1
+        if self.polls == 0:
+            self.cur = self.later
+        return super().nodes()
+
+
+def test_tap_waits_for_its_target():
+    d = SlowDevice({"loading": [], "page": ["Open"], "next": ["Done"]}, {"Open": "next"}, "loading", "page", 3)
+    f = flow_mod.Flow(d)
+    assert f.tap("Open").shows("Done")
+
+
+def test_ambiguous_query_fails_at_once():
+    import time
+
+    import pytest
+
+    d = FakeDevice({"s": ["Reply · 1", "Reply · 2"]}, {}, "s")
+    f = flow_mod.Flow(d)
+    start = time.monotonic()
+    with pytest.raises(tree.Ambiguous):
+        f.tap("~Reply")
+    assert time.monotonic() - start < 1
+    assert f("~Reply").count() == 2
+    assert f("~Reply").first().label == "Reply · 1"
+
+
+def test_locator_scopes_to_a_container():
+    xml = screen(
+        node((0, 0, 1080, 1000), rid="list", children=node((0, 100, 1080, 200), clickable=True, desc="OK")),
+        node((0, 1500, 1080, 2400), rid="sheet", children=node((0, 1600, 1080, 1700), clickable=True, desc="OK")),
+    )
+
+    class D(FakeDevice):
+        def nodes(self):
+            ns = tree.parse(xml, SCREEN)
+            self.counter = tree.assign_refs(ns, self.prev, self.counter)
+            self.prev = tree.to_state(ns)
+            return ns
+
+    d = D({}, {}, None)
+    f = flow_mod.Flow(d)
+    assert f("#sheet")("OK").node.center[1] == 1650
+    assert f("#list")("OK").node.center[1] == 150
+    assert f("btn:OK").count() == 2
+
+
+def test_go_taps_in_order():
+    d = FakeDevice({"a": ["Me"], "b": ["Settings"], "c": ["Display"]}, {"Me": "b", "Settings": "c"}, "a")
+    f = flow_mod.Flow(d)
+    assert f.go("Me", "Settings").shows("Display")
+    assert d.taps == ["Me", "Settings"]
+
+
+def test_bare_assert_reports_its_line(tmp_path: Path, capsys, monkeypatch):
+    d = FakeDevice({"s": ["Home"]}, {}, "s")
+    monkeypatch.setattr(flow_mod, "Device", lambda cfg: d)
+    monkeypatch.setattr(flow_mod, "_dump_failure", lambda dev: None)
+    cfg = type("C", (), {"flows_dir": tmp_path})()
+    f = tmp_path / "a.py"
+    f.write_text('assert d.sees("Home")\nassert d.sees("Saved")\n')
+    assert flow_mod.run_flow(cfg, str(f), []) == 1
+    assert 'line 2): assert failed: assert d.sees("Saved")' in capsys.readouterr().out

@@ -16,6 +16,7 @@ SNAP_CAP = 80
 
 
 def print_nodes(ns: list[Node], cap: int | None = SNAP_CAP) -> None:
+    ns = tree.listed(ns)
     shown = ns if cap is None else ns[:cap]
     for n in shown:
         print(tree.format_node(n))
@@ -35,7 +36,7 @@ def report(verb: str, o: Outcome, quiet: bool = False) -> None:
         return
     lines, wholesale = tree.delta(o.before, o.after)
     if wholesale:
-        print(f"screen changed ({len(o.after)} elements):")
+        print(f"screen changed ({len(tree.listed(o.after))} elements):")
         print_nodes(o.after, cap=40)
     elif lines:
         print("\n".join(lines))
@@ -259,8 +260,7 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
         ns = d.nodes()
         if a.within:
             box = tree.resolve(ns, a.within)
-            i = ns.index(box)
-            ns = ns[i : box.end]
+            ns = [box, *tree.within(ns, box)]
         if a.json:
             import json
 
@@ -272,7 +272,7 @@ def dispatch(d: Device, a: argparse.Namespace) -> int:
                 }, ensure_ascii=False))
             return 0
         pkgs = sorted({n.pkg for n in ns if n.pkg})
-        print(f"{' + '.join(pkgs) or '(empty)'} · {d.size[0]}x{d.size[1]} · {len(ns)} elements")
+        print(f"{' + '.join(pkgs) or '(empty)'} · {d.size[0]}x{d.size[1]} · {len(tree.listed(ns))} elements")
         print_nodes(ns, cap=None if a.all else SNAP_CAP)
     elif a.cmd == "tap":
         if a.xy:

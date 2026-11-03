@@ -35,6 +35,7 @@ class Node:
     covered: bool = False
     covered_by: Node | None = None
     raw: int = 0  # index in draw order among all visible elements
+    raw_end: int = 0  # past this element's descendants, in the same order
     scroller: list | None = field(default=None, repr=False)  # raw slot of the nearest scrolling ancestor
 
     @property
@@ -96,11 +97,15 @@ def parse(xml: str, screen: tuple[int, int]) -> list[Node]:
                 role = _role(a)
                 own = (a.get("text") or a.get("content-desc") or "").strip()
                 interactive = role != "text" and role != "img"
-                if owner is not None and not interactive:
+                rid = _short_id(a.get("resource-id", ""))
+                if not interactive and not own and rid:
+                    # An id-only container: not listed, but a flow can scope to it.
+                    role = "box"
+                if owner is not None and not interactive and role != "box":
                     # Text inside a button belongs to the button.
                     if own and own not in owner.parts and len(owner.parts) < 4:
                         owner.parts.append(own)
-                elif interactive or own:
+                elif interactive or own or role == "box":
                     node = Node(
                         role=role,
                         text=a.get("text", ""),
@@ -134,6 +139,8 @@ def parse(xml: str, screen: tuple[int, int]) -> list[Node]:
             node.end = len(out)
         if slot is not None:
             slot[1] = len(raw)
+            if node is not None:
+                node.raw_end = slot[1]
 
     walk(root, 0, None, None)
     _mark_covered(out, raw, sw * sh)
@@ -155,7 +162,7 @@ def _mark_covered(nodes: list[Node], raw: list[list], screen_area: int) -> None:
     # clickable.
     listed = {n.raw: n for n in nodes}
     for n in nodes:
-        if n.role in ("scroll", "text", "img"):
+        if n.role in ("scroll", "text", "img", "box"):
             continue
         cx, cy = n.center
         first = raw[n.raw][1]
@@ -171,6 +178,16 @@ def _mark_covered(nodes: list[Node], raw: list[list], screen_area: int) -> None:
                 n.covered = True
                 n.covered_by = listed.get(j)
                 break
+
+
+def listed(nodes: list[Node]) -> list[Node]:
+    """The nodes a listing shows: all but id-only containers."""
+    return [n for n in nodes if n.role != "box"]
+
+
+def within(nodes: list[Node], scope: Node) -> list[Node]:
+    """The nodes drawn inside scope's subtree."""
+    return [n for n in nodes if scope.raw < n.raw < scope.raw_end]
 
 
 def format_node(n: Node, compact: bool = False) -> str:
@@ -251,7 +268,15 @@ class QueryError(Exception):
     pass
 
 
-ROLES = ("btn", "input", "text", "img", "scroll", "check", "switch")
+class NoMatch(QueryError):
+    """Nothing matches; it may still appear."""
+
+
+class Ambiguous(QueryError):
+    """Several match; waiting will not make it one."""
+
+
+ROLES = ("btn", "input", "text", "img", "scroll", "check", "switch", "box")
 
 
 def match(nodes: list[Node], q: str) -> list[Node]:
@@ -298,13 +323,13 @@ def resolve(nodes: list[Node], q: str, nth: int | None = None) -> Node:
     hits = match(nodes, q)
     if nth is not None:
         if not 1 <= nth <= len(hits):
-            raise QueryError(f"{q!r} matched {len(hits)}, no #{nth}")
+            raise NoMatch(f"{q!r} matched {len(hits)}, no #{nth}")
         return hits[nth - 1]
     if len(hits) == 1:
         return hits[0]
     if not hits:
         if q.startswith("@e"):
-            raise QueryError(f"{q} is stale: that element is no longer on screen. Run `nolook snap`.")
+            raise NoMatch(f"{q} is stale: that element is no longer on screen. Run `nolook snap`.")
         msg = f"nothing matches {q!r}"
         if q.startswith("#"):
             ids = sorted({n.rid for n in nodes if n.rid})
@@ -316,9 +341,9 @@ def resolve(nodes: list[Node], q: str, nth: int | None = None) -> Node:
             near = near_misses(nodes, q)
             if near:
                 msg += "\nclosest:\n" + "\n".join("  " + format_node(n, compact=True) for n in near)
-        raise QueryError(msg)
+        raise NoMatch(msg)
     lines = "\n".join("  " + format_node(n, compact=True) for n in hits[:8])
-    raise QueryError(f"{q!r} matched {len(hits)}; use a ref, add a role (btn:…), or --nth:\n{lines}")
+    raise Ambiguous(f"{q!r} matched {len(hits)}; use a ref, add a role (btn:…), or --nth:\n{lines}")
 
 
 # Deltas ---------------------------------------------------------------------
@@ -326,6 +351,8 @@ def resolve(nodes: list[Node], q: str, nth: int | None = None) -> Node:
 
 def delta(before: list[Node], after: list[Node], limit: int = 20) -> tuple[list[str], bool]:
     """Lines describing what changed, and whether the screen changed wholesale."""
+    before = listed(before)
+    after = listed(after)
     old = {n.ref for n in before}
     new = {n.ref for n in after}
     added = [n for n in after if n.ref not in old]
