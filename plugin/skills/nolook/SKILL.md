@@ -102,9 +102,39 @@ screenshot it saved (not read). Flows worth keeping go in the project's flows
 directory (`nolook flows` lists them, with their docstrings), so the next
 session can run them by name.
 
-Flow methods: `tap long_tap tap_xy type key back scroll open launch wait gone
-shot` act and print a line; `exists find text snap log` only read, for
-branching; `check(cond, msg)` and `fail(msg)` stop the flow.
+Flow methods:
+
+- Act (one line each), returning a step: `tap long_tap tap_xy type key back
+  scroll open launch`. A step has `.added` and `.removed` (elements),
+  `.changed` (the screen changed wholesale) and `.shows(q)` (whether the
+  screen after it matches q), so a flow can branch on what an action did
+  without reading the screen again. `d.tap(q).ref` still gives the target.
+- Wait: `wait(q, timeout)`, `gone(q, timeout)`.
+- Read, for branching: `exists find text snap log`.
+- Measure: `frames(label=…)` (perf frames), `with d.measure("label"):` around
+  any steps (frame timing of just those), `motion(tap=…, label=…)`,
+  `compile("speed")`. Each prints a summary line and returns a dict.
+- Interruptions: `d.dismiss_when("New version", tap="Later")` near the top.
+  After every action and while waiting, if the first query shows, nolook taps
+  the second (or the first) and prints a line. The write-action guard still
+  applies.
+- Output: `d.result(key=value, …)` collects values; they print as one
+  `result {…}` JSON line at the end, also when the flow fails. Use it to hand
+  back what the flow read instead of printing it with `note`.
+- Control: `check(cond, msg)` and `fail(msg)` stop the flow; `note(msg)`,
+  `sleep(s)`.
+
+```python
+"""Fling the feed with and without the glass effect."""
+d.dismiss_when("New version", tap="Later")
+d.launch(fresh=True)
+d.tap("Feed")
+before = d.frames(label="glass")
+d.tap("Settings"); d.tap("Glass"); d.back()
+d.tap("Feed")
+after = d.frames(label="flat")
+d.result(janky=[before["janky"], after["janky"]])
+```
 
 ## Screenshots
 
@@ -164,9 +194,9 @@ jank is the app missing deadlines (main or render thread) or the pipeline
 stuffed (render thread / GPU behind), and what ran inside the worst frames.
 Durations in `sql` are nanoseconds.
 
-Swipes fling at `--speed` px/s (default 10000, a quick flick); `--duration
-0.25` reproduces a 250 ms `input swipe`. The summary prints the speed the
-device actually reached, which is lower when it paces the steps slower.
+Swipes are `input swipe` gestures timed on the device, flung at `--speed`
+px/s (default 10000, a quick flick); `--duration 0.25` gives a 250 ms swipe
+whatever the distance. The summary prints the gesture used.
 
 The summary is janky % (new and legacy), p50/p90/p99 frame time, GPU p90,
 slow UI thread and missed-deadline counts, plus the compile mode. Measure on

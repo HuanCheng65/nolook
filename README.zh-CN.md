@@ -101,6 +101,8 @@ d.shot("#toolbar")
 
 `nolook run open_note` 每一步打印一行。失败时打印失败的步骤和行号、当时的屏幕内容，以及一张已保存但未读取的截图的路径。
 
+flow 还可以直接测量（`d.frames()`、`with d.measure("x"):`、`d.motion(…)`），自动关闭意外弹窗（`d.dismiss_when("给我们评分", tap="以后再说")`），根据某一步操作的结果分支（`if d.tap("保存").shows("已保存"):`），并以 JSON 返回读取到的值（`d.result(count=3)`）。
+
 ### 动画
 
 ```sh

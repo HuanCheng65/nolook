@@ -132,6 +132,11 @@ d.shot("#toolbar")
 step and line, the screen at that moment, and the path of a screenshot it
 saved without reading.
 
+Flows can also measure (`d.frames()`, `with d.measure("x"):`, `d.motion(…)`),
+close interruptions on their own (`d.dismiss_when("Rate us", tap="Not now")`),
+branch on what an action changed (`if d.tap("Save").shows("Saved"):`), and
+hand back values as JSON (`d.result(count=3)`).
+
 ### Animations
 
 ```sh
