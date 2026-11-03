@@ -1,0 +1,7 @@
+{
+  "name": "nolook",
+  "owner": { "name": "HuanCheng65" },
+  "plugins": [
+    { "name": "nolook", "source": "./plugin", "description": "Drive Android apps through their UI tree instead of screenshots." }
+  ]
+}

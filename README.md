@@ -15,13 +15,20 @@ screen changed (10 elements):
 …
 ```
 
-See [skills/nolook/SKILL.md](skills/nolook/SKILL.md) for the full usage an
+See [plugin/skills/nolook/SKILL.md](plugin/skills/nolook/SKILL.md) for the full usage an
 agent gets.
 
 ## Install
 
 ```
 uv tool install --editable .
+```
+
+Then in Claude Code:
+
+```
+/plugin marketplace add ~/nolook
+/plugin install nolook@nolook
 ```
 
 Backed by [uiautomator2](https://github.com/openatx/uiautomator2); its
