@@ -16,7 +16,21 @@ def test_compare_calls_overlap_noise_and_separation_a_difference():
     lines = perf.compare_table([rec("glass", [40.0, 45.0, 43.0]), rec("flat", [41.0, 44.0, 42.0]), rec("none", [20.0, 22.0, 21.0])])
     text = "\n".join(lines)
     assert "flat: janky 43.0→42.0 within noise" in text
-    assert "none: janky 43.0→21.0 lower (no overlap)" in text
+    assert "none: janky 43.0→21.0 likely lower (no overlap, which chance gives 1 in 10 at 3 vs 3 runs" in text
+
+
+def test_five_runs_a_side_make_a_separation_firm():
+    lines = perf.compare_table([rec("a", [40.0, 41.0, 42.0, 43.0, 44.0]), rec("b", [30.0, 31.0, 32.0, 33.0, 34.0])])
+    assert any("janky 42.0→32.0 lower (no overlap; by chance under 1 in 50)" in ln for ln in lines)
+
+
+def test_compare_judges_gpu_p90_and_chosen_keys():
+    a, b = rec("a", [40.0, 41.0, 42.0]), rec("b", [40.0, 41.0, 42.0])
+    a["values"]["gpu_p90"], b["values"]["gpu_p90"] = [18, 19, 20], [11, 11, 12]
+    text = "\n".join(perf.compare_table([a, b]))
+    assert "gpu_p90 19→11 likely lower" in text
+    only = perf.compare_table([a, b], verdict=["janky"])[-1]
+    assert "gpu_p90" not in only and "janky" in only
 
 
 def test_compare_warns_when_gestures_differ():

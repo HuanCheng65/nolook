@@ -183,6 +183,7 @@ def build() -> argparse.ArgumentParser:
     c.add_argument("labels", nargs="*", help="only these labels")
     c.add_argument("--last", type=int, default=10)
     c.add_argument("--all", action="store_true", help="every counter as a column")
+    c.add_argument("--keys", help="counters to judge each label on, comma-separated (default janky,p90,p99,gpu_p90)")
     c = ps.add_parser("compile", help="set the ART compile mode and stop the app so it takes effect")
     c.add_argument("mode", help="speed, speed-profile, verify, quicken, or reset")
     c = ps.add_parser("stack", help="sample the main thread now: which code it spends CPU in (for hangs that spin)")
@@ -366,7 +367,12 @@ def perf_dispatch(d: Device, a: argparse.Namespace) -> None:
         rec = {"label": a.label or "", "debuggable": dbg, **perf.read(d)}
         print(json.dumps(rec, ensure_ascii=False) if a.json else perf.format_record(rec, keys))
     elif a.perf_cmd == "compare":
-        for ln in perf.compare_table(perf.history(d, a.labels or None, a.last), keys):
+        verdict = [k.strip() for k in a.keys.split(",") if k.strip()] if a.keys else perf.VERDICT
+        unknown = [k for k in verdict if k not in dict(perf._FIELDS)]
+        if unknown:
+            raise NolookError(f"unknown counter {', '.join(unknown)}; known: {', '.join(k for k, _ in perf._FIELDS)}")
+        keys = keys + [k for k in verdict if k not in keys]
+        for ln in perf.compare_table(perf.history(d, a.labels or None, a.last), keys, verdict):
             print(ln)
     elif a.perf_cmd == "compile":
         print(f"compile status: {perf.compile(d, a.mode) or 'unknown'} · app stopped; relaunch it before measuring")

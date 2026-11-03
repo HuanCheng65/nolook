@@ -7,6 +7,7 @@ thing, run it again with `--label B`, then `nolook perf compare`.
 from __future__ import annotations
 
 import json
+import math
 import re
 import shlex
 import time
@@ -35,6 +36,9 @@ _FIELDS = [
 ]
 
 SHORT = ["frames", "janky", "janky_legacy", "p50", "p90", "p99", "gpu_p90", "slow_ui", "deadline_missed"]
+
+# Counters `compare` judges each label on, against the first.
+VERDICT = ["janky", "p90", "p99", "gpu_p90"]
 
 TRACE_CONFIG = """
 buffers {{ size_kb: 65536 fill_policy: RING_BUFFER }}
@@ -260,7 +264,7 @@ def _groups(recs: list[dict]) -> dict[str, dict]:
     return groups
 
 
-def compare_table(recs: list[dict], keys: list[str] = SHORT) -> list[str]:
+def compare_table(recs: list[dict], keys: list[str] = SHORT, verdict: list[str] = VERDICT) -> list[str]:
     """One row per label (its runs pooled): median and range; then each label against the first."""
     if not recs:
         return ["no runs recorded yet (nolook perf frames --label …)"]
@@ -292,7 +296,7 @@ def compare_table(recs: list[dict], keys: list[str] = SHORT) -> list[str]:
         out.append(f"against {names[0]}:")
         for name in names[1:]:
             parts = []
-            for k in ("janky", "p90", "p99"):
+            for k in verdict:
                 a, b = base["values"].get(k), groups[name]["values"].get(k)
                 if not a or not b:
                     continue
@@ -302,15 +306,25 @@ def compare_table(recs: list[dict], keys: list[str] = SHORT) -> list[str]:
 
 
 def _verdict(a: list, b: list) -> str:
-    """Whether b differs from a beyond the spread of either."""
+    """Whether b differs from a beyond the spread of either.
+
+    With no real difference, two groups of runs still fail to overlap by
+    chance: 2 in C(na+nb, na) of the orders are fully separated, 1 in 10 at
+    3 against 3. A separation is reported as likely until that chance is small.
+    """
     ma, mb = _median(a), _median(b)
     if len(a) < 3 or len(b) < 3:
         return f"{ma}→{mb} (fewer than 3 runs each: cannot tell)"
     if max(a) < min(b):
-        return f"{ma}→{mb} higher (no overlap)"
-    if max(b) < min(a):
-        return f"{ma}→{mb} lower (no overlap)"
-    return f"{ma}→{mb} within noise (ranges overlap)"
+        word = "higher"
+    elif max(b) < min(a):
+        word = "lower"
+    else:
+        return f"{ma}→{mb} within noise (ranges overlap)"
+    odds = math.comb(len(a) + len(b), len(a)) // 2
+    if odds < 50:
+        return f"{ma}→{mb} likely {word} (no overlap, which chance gives 1 in {odds} at {len(a)} vs {len(b)} runs: 5 runs a side to confirm)"
+    return f"{ma}→{mb} {word} (no overlap; by chance under 1 in 50)"
 
 
 # Compile modes ----------------------------------------------------------------

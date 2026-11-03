@@ -191,7 +191,9 @@ Rules that keep conclusions honest:
   (`--runs`) and prints the median with the range in brackets. Before you
   say one setting is faster, run `perf compare`: it calls a difference
   "within noise" when the ranges overlap, and "cannot tell" with fewer than
-  3 runs a side.
+  3 runs a side. Ranges that do not overlap at 3 against 3 still happen by
+  chance 1 time in 10, so it says "likely" until each side has 5 runs; say
+  "likely" too. It judges janky, p90, p99 and gpu_p90; `--keys` picks others.
 - **Compare like with like.** Records carry the gesture (distance, duration,
   rounds) and nolook's version; `compare` warns when they differ. Keep
   `--speed` / `--duration` / `--rounds` the same across labels.
