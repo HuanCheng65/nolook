@@ -1,6 +1,6 @@
 [project]
 name = "nolook"
-version = "0.3.0"
+version = "0.4.0"
 description = "Drive an Android device by what is on screen, not by screenshots. Built for coding agents."
 readme = "README.md"
 license = "MIT"
