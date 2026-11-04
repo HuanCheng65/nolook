@@ -178,3 +178,11 @@ def test_open_resolves_a_path_against_the_base_url(page, tmp_path, site):
     b.open_uri("other.html", None)
     time.sleep(0.3)
     assert listed(b) == [("text", "Other page")]
+
+
+def test_a_container_with_an_id_scopes_a_query_without_being_listed(page):
+    b = page('<div id=a><button>Reply</button></div><div data-testid=b><div><button>Reply</button></div></div>')
+    ns = b.dump()
+    assert [n.role for n in tree.listed(ns)] == ["btn", "btn"]
+    box = tree.resolve(ns, "#b")
+    assert [n.raw for n in tree.match(tree.within(ns, box), "Reply")] == [tree.match(ns, "Reply")[1].raw]

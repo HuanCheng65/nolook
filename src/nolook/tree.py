@@ -207,7 +207,11 @@ def format_node(n: Node, compact: bool = False) -> str:
         bits.append("[disabled]")
     if n.covered:
         by = n.covered_by
-        bits.append(f"[covered by {by.ref}]" if by is not None else "[covered]")
+        if by is not None and by.role == "box":
+            # Boxes are not listed; name the cover by its id instead of a ref nobody saw.
+            bits.append(f"[covered by #{by.rid}]")
+        else:
+            bits.append(f"[covered by {by.ref}]" if by is not None else "[covered]")
     bits.append("(%d,%d)" % n.center)
     return " ".join(bits) if compact else "  " * n.depth + " ".join(bits)
 

@@ -368,6 +368,10 @@ def build(snapshot: dict, ax_nodes: list[dict], viewport: tuple[int, int]) -> li
     for n in out:
         if n.role == "text":
             if not n.text:
+                if n.rid:
+                    # Not listed, but a flow can scope to it: d("#thread")("Reply").
+                    n.role = "box"
+                    kept.append(n)
                 continue
             n.parts = [n.text]
         kept.append(n)
