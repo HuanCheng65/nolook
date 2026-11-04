@@ -193,7 +193,8 @@ guard = ["/api/like", "/api/post"]   # logcat regexes flagged after each action
 danger = ["Like", "Send", "Delete"]  # tap refuses these labels without --confirm
 ```
 
-`NOLOOK_SERIAL` and `NOLOOK_ADB_PORT` override it.
+`NOLOOK_SERIAL`, `NOLOOK_ADB_PORT` and `NOLOOK_PACKAGE` override it, and so do
+`--serial` and `--package` before the command: `nolook --package com.example.notes run flow.py`.
 
 For Jetpack Compose, set `Modifier.semantics { testTagsAsResourceId = true }`
 near the root (debug builds are enough) so `testTag`s appear as `#ids`, and

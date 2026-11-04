@@ -63,6 +63,7 @@ def build() -> argparse.ArgumentParser:
         "~part (contains), /regex/, plain text (exact); prefix a role to narrow: btn:Save.",
     )
     p.add_argument("--serial", help="device serial (default: .nolook.toml, then the only device)")
+    p.add_argument("--package", help="app package for launch, log and flows (default: .nolook.toml)")
     p.add_argument("-q", "--quiet", action="store_true", help="print the action line only, no changes")
     p.add_argument("--session", help=argparse.SUPPRESS)  # the device a Claude Code session last drove, for its pane
     sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
@@ -227,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
         follow_session(cfg, a.session)
     if a.serial:
         cfg.serial = a.serial
+    if a.package:
+        cfg.package = a.package
 
     if a.cmd == "topng":
         from PIL import Image

@@ -157,10 +157,11 @@ class Locator:
         waited = self._flow._waited
         return self._flow._step(f"long-press {self!r}", self._flow._d.tap(n.ref, long=True, confirm=confirm), waited)
 
-    def type(self, text: str, append: bool = False, timeout: float | None = None) -> Step:
+    def type(self, text: str, append: bool = False, timeout: float | None = None, enter: bool = False) -> Step:
         n, _ = self._flow._locate(self, timeout)
         waited = self._flow._waited
-        return self._flow._step(f"type {text[:20]!r} into {self!r}", self._flow._d.type(text, n.ref, append=append), waited)
+        step = self._flow._step(f"type {text[:20]!r} into {self!r}", self._flow._d.type(text, n.ref, append=append), waited)
+        return self._flow.key("enter") if enter else step
 
     def scroll(self, direction: str = "down", until: str | None = None, max_swipes: int = 10) -> Step:
         n, _ = self._flow._locate(self)
@@ -350,10 +351,11 @@ class Flow:
     def tap_xy(self, x: int, y: int) -> Step:
         return self._step(f"tap ({x},{y})", self._d.tap_xy(x, y))
 
-    def type(self, text: str, into: str | None = None, append: bool = False) -> Step:
+    def type(self, text: str, into: str | None = None, append: bool = False, enter: bool = False) -> Step:
         if into is not None:
-            return Locator(self, into).type(text, append=append)
-        return self._step(f"type {text[:20]!r}", self._d.type(text, None, append=append))
+            return Locator(self, into).type(text, append=append, enter=enter)
+        step = self._step(f"type {text[:20]!r}", self._d.type(text, None, append=append))
+        return self.key("enter") if enter else step
 
     def key(self, name: str) -> Step:
         return self._step(f"key {name}", self._d.key(name))

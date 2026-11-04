@@ -52,6 +52,7 @@ def find_config(start: Path | None = None) -> Config:
     known = {k: v for k, v in data.items() if k in Config.__dataclass_fields__ and k != "root"}
     cfg = Config(root=root, **known)
     cfg.serial = os.environ.get("NOLOOK_SERIAL", cfg.serial)
+    cfg.package = os.environ.get("NOLOOK_PACKAGE", cfg.package)
     port = os.environ.get("NOLOOK_ADB_PORT")
     if port:
         cfg.adb_port = int(port)

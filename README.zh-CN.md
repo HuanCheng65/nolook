@@ -149,7 +149,7 @@ guard = ["/api/like", "/api/post"]   # 每次操作后在 logcat 中检查的正
 danger = ["点赞", "发送", "删除"]      # 不带 --confirm 时拒绝点击的标签
 ```
 
-环境变量 `NOLOOK_SERIAL` 和 `NOLOOK_ADB_PORT` 优先于配置文件。
+环境变量 `NOLOOK_SERIAL`、`NOLOOK_ADB_PORT`、`NOLOOK_PACKAGE` 优先于配置文件，命令前的 `--serial`、`--package` 也一样：`nolook --package com.example.notes run flow.py`。
 
 对于 Jetpack Compose，请在根部设置 `Modifier.semantics { testTagsAsResourceId = true }`（仅 debug 构建即可），使 `testTag` 显示为 `#id`；并为图标按钮设置 `contentDescription`。
 

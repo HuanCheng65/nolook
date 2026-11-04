@@ -121,7 +121,7 @@ What to know:
 - **Checks**: `assert d.sees("Saved")` (on screen, not covered); `d.exists(q)`,
   `d.find(q)`, `d.text(q)`, `d.snap()` read without acting.
 - **Navigation and keys**: `d.go(*labels)`, `d.back()`, `d.key("enter")`,
-  `d.open(uri)`, `d.launch(fresh=True)`, `d.type(text, into=q)`.
+  `d.open(uri)`, `d.launch(fresh=True)`, `d.type(text, into=q, enter=True)`.
 - **Measuring**: `d.frames(label=…)`, `with d.measure("label"):`,
   `d.motion(tap=q, label=…)`, `with d.slow(4):`, `d.compile("speed")`. Each
   prints a summary line and returns a dict.
@@ -252,7 +252,8 @@ If `nolook` is not on PATH, it installs with `uv tool install nolook` (or
 Perfetto, and says what to fix; run it first when something fails to
 connect.
 
-A `.nolook.toml` at the project root picks the device and app:
+A `.nolook.toml` at the project root picks the device and app; without one,
+`nolook --package PKG …` (or `NOLOOK_PACKAGE`) names the app, also for flows:
 
 ```toml
 serial = "emulator-5554"
