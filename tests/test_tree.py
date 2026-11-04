@@ -126,3 +126,12 @@ def test_id_only_containers_scope_but_are_not_listed():
     assert sheet.role == "box"
     assert [n.label for n in tree.within(ns, sheet)] == ["OK"]
     assert [n.role for n in tree.listed(ns)] == ["btn"]
+
+
+def test_fold_cuts_long_runs_of_look_alike_rows():
+    rows = [tree.Node("btn", "", "", "", "", "", (0, i * 10, 100, i * 10 + 10), {}, 0, parts=[f"card {i}"], ref=f"@e{i + 1}") for i in range(10)]
+    head = tree.Node("text", "", "", "", "", "", (0, 0, 10, 10), {}, 0, parts=["Feed"], ref="@e0")
+    lines = tree.fold([head, *rows], cap=6)
+    assert len(lines) == 1 + 3 + 1
+    assert lines[-1] == "… 7 more like these, @e4–@e10 (nolook snap --all)"
+    assert len(tree.fold([head, *rows], cap=20)) == 11  # fits: nothing folds

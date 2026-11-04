@@ -17,11 +17,16 @@ SNAP_CAP = 80
 
 def print_nodes(ns: list[Node], cap: int | None = SNAP_CAP) -> None:
     ns = tree.listed(ns)
-    shown = ns if cap is None else ns[:cap]
-    for n in shown:
-        print(tree.format_node(n))
-    if len(ns) > len(shown):
-        print(f"… {len(ns) - len(shown)} more (nolook snap --all)")
+    lines = [tree.format_node(n) for n in ns]
+    if cap is not None and len(ns) > cap:
+        # Too long to show whole: fold runs of look-alike rows (a feed, a
+        # grid of cards) before cutting the tail, so what follows them shows.
+        lines = tree.fold(ns, cap)
+    shown = lines if cap is None else lines[:cap]
+    for ln in shown:
+        print(ln)
+    if len(lines) > len(shown):
+        print(f"… {len(lines) - len(shown)} more lines (nolook snap --all)")
 
 
 # Commands whose failures go to the journal the pane shows (their successes
@@ -59,12 +64,13 @@ def parse_box(s: str) -> tuple[int, int, int, int]:
 def build() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="nolook",
-        description="Drive an Android device by what is on screen. Queries: @e12 (ref), #tag (id), "
+        description="Drive an Android device or a web page by what is on screen. Queries: @e12 (ref), #tag (id), "
         "~part (contains), /regex/, plain text (exact); prefix a role to narrow: btn:Save.",
     )
     p.add_argument("--serial", help="device serial (default: .nolook.toml, then the only device)")
     p.add_argument("--package", help="app package for launch, log and flows (default: .nolook.toml)")
     p.add_argument("-q", "--quiet", action="store_true", help="print the action line only, no changes")
+    p.add_argument("--web", action="store_true", help="drive the browser page (default when .nolook.toml has [web])")
     p.add_argument("--session", help=argparse.SUPPRESS)  # the device a Claude Code session last drove, for its pane
     sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
 
@@ -202,6 +208,15 @@ def build() -> argparse.ArgumentParser:
     c.add_argument("--top", type=int, default=15)
     c = ps.add_parser("anr", help="the last ANR's header and main thread stack")
     c.add_argument("-n", type=int, default=40)
+    s = sub.add_parser("web", help="start, attach to or stop the browser that web commands drive")
+    ws = s.add_subparsers(dest="web_cmd", required=True, metavar="ACTION")
+    w = ws.add_parser("start", help="launch a browser with this profile (headless unless --headed)")
+    w.add_argument("--headed", action="store_true", help="show the window")
+    w.add_argument("url", nargs="?", help="page to open (default: url in [web], else blank)")
+    w = ws.add_parser("attach", help="drive a browser you started with --remote-debugging-port")
+    w.add_argument("endpoint", help="e.g. http://127.0.0.1:9222")
+    ws.add_parser("stop", help="close the browser nolook started (an attached one is only forgotten)")
+    ws.add_parser("status", help="the browser and its pages")
     sub._choices_actions = [a for a in sub._choices_actions if a.dest not in ("topng", "screen")]
     return p
 
@@ -230,6 +245,28 @@ def main(argv: list[str] | None = None) -> int:
         cfg.serial = a.serial
     if a.package:
         cfg.package = a.package
+    if a.web and cfg.web is None:
+        cfg.web = {}
+
+    if a.cmd == "web":
+        from . import web
+
+        if cfg.web is None:
+            cfg.web = {}
+        try:
+            if a.web_cmd == "start":
+                ep = web.start(cfg, a.headed, a.url)
+                print(("already running at " if ep.get("already") else "browser at ") + ep["http"] + f" · profile {web.profile_name(cfg)}")
+            elif a.web_cmd == "attach":
+                print("attached to " + web.attach(cfg, a.endpoint)["http"])
+            elif a.web_cmd == "stop":
+                print(web.stop(cfg))
+            else:
+                print("\n".join(web.status(cfg)))
+        except NolookError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        return 0
 
     if a.cmd == "topng":
         from PIL import Image

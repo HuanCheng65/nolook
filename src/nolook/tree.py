@@ -196,10 +196,11 @@ def format_node(n: Node, compact: bool = False) -> str:
         label = label[: LABEL_MAX - 1] + "…"
     bits = [n.ref or "", n.role] if compact else [f"{n.ref or '':<5}", f"{n.role:<6}"]
     if label:
-        bits.append(f'"{label}"')
+        # A name nolook inferred from what sits next to the element.
+        bits.append(f'~"{label}"' if n.flags.get("inferred") else f'"{label}"')
     if n.rid:
         bits.append(f"#{n.rid}")
-    for flag in ("checked", "focused", "selected"):
+    for flag in ("checked", "focused", "selected", "invisible"):
         if n.flags.get(flag):
             bits.append(f"[{flag}]")
     if not n.flags.get("enabled", True):
@@ -209,6 +210,40 @@ def format_node(n: Node, compact: bool = False) -> str:
         bits.append(f"[covered by {by.ref}]" if by is not None else "[covered]")
     bits.append("(%d,%d)" % n.center)
     return " ".join(bits) if compact else "  " * n.depth + " ".join(bits)
+
+
+FOLD_RUN = 6  # look-alike rows in a row before they fold
+FOLD_KEEP = 3
+
+
+def _shape(n: Node) -> tuple:
+    return (n.role, n.depth, len(n.parts), n.rid, n.covered)
+
+
+def fold(nodes: list[Node], cap: int) -> list[str]:
+    """Lines for nodes, folding the longest runs of same-shaped rows first, only until they fit in cap."""
+    runs: list[list[Node]] = []
+    for n in nodes:
+        if runs and _shape(runs[-1][0]) == _shape(n):
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    folded: set[int] = set()
+    total = len(nodes)
+    for k in sorted(range(len(runs)), key=lambda k: -len(runs[k])):
+        if total <= cap or len(runs[k]) < FOLD_RUN:
+            break
+        folded.add(k)
+        total -= len(runs[k]) - FOLD_KEEP - 1
+    out: list[str] = []
+    for k, run in enumerate(runs):
+        if k in folded:
+            out.extend(format_node(n) for n in run[:FOLD_KEEP])
+            pad = "  " * run[0].depth
+            out.append(f"{pad}… {len(run) - FOLD_KEEP} more like these, {run[FOLD_KEEP].ref}–{run[-1].ref} (nolook snap --all)")
+        else:
+            out.extend(format_node(n) for n in run)
+    return out
 
 
 # Refs -----------------------------------------------------------------------
@@ -276,7 +311,7 @@ class Ambiguous(QueryError):
     """Several match; waiting will not make it one."""
 
 
-ROLES = ("btn", "input", "text", "img", "scroll", "check", "switch", "box")
+ROLES = ("btn", "link", "input", "text", "img", "scroll", "check", "switch", "box")
 
 
 def match(nodes: list[Node], q: str) -> list[Node]:

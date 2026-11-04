@@ -6,6 +6,9 @@
     flows = "tools/flows"
     guard = ["/api/like", "/api/post"]   # logcat regexes flagged after each action
     danger = ["Like", "Send", "Delete"]  # labels a tap refuses without --confirm
+
+    [web]                                # drive a browser page instead of a device
+    url = "http://localhost:3000"        # see docs/web-backend.md
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ class Config:
     adb_port: int | None = None
     package: str | None = None
     flows: str = "flows"
+    web: dict | None = None  # a [web] table selects the web backend; see docs/web-backend.md
     guard: list[str] = field(default_factory=list)
     hide: list[str] = field(default_factory=lambda: ["com.android.systemui"])
     # Taps on these refuse without confirm: the app may be logged in to a
@@ -53,6 +57,8 @@ def find_config(start: Path | None = None) -> Config:
     cfg = Config(root=root, **known)
     cfg.serial = os.environ.get("NOLOOK_SERIAL", cfg.serial)
     cfg.package = os.environ.get("NOLOOK_PACKAGE", cfg.package)
+    if os.environ.get("NOLOOK_WEB") and cfg.web is None:
+        cfg.web = {}
     port = os.environ.get("NOLOOK_ADB_PORT")
     if port:
         cfg.adb_port = int(port)

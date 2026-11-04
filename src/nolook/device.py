@@ -43,7 +43,11 @@ class Outcome:
 class Device:
     def __init__(self, cfg: Config, backend: Backend | None = None):
         self.cfg = cfg
-        if backend is None:
+        if backend is None and cfg.web is not None:
+            from .web import WebBackend
+
+            backend = WebBackend(cfg)
+        elif backend is None:
             from .android import AndroidBackend
 
             backend = AndroidBackend(cfg.serial)
@@ -100,6 +104,9 @@ class Device:
         return bool(tree.match(self.nodes(), q))
 
     def settle(self, timeout: float = 3.0) -> tuple[list[Node], float | None]:
+        # A backend that sees the network (web) also waits for the responses
+        # an action caused: a screen can hold still while a request is out.
+        pending = getattr(self.backend, "pending", None)
         start = time.monotonic()
         time.sleep(SETTLE_MIN)
         last = self.nodes()
@@ -109,7 +116,7 @@ class Device:
                 return last, None
             time.sleep(SETTLE_POLL)
             cur = self.nodes()
-            if _sig(cur) == _sig(last):
+            if _sig(cur) == _sig(last) and not (pending and pending()):
                 return cur, round(time.monotonic() - start, 2)
             last = cur
 
