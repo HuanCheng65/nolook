@@ -181,3 +181,15 @@ def test_slow_waits_are_flagged(capsys):
     out = capsys.readouterr().out
     assert "waited" in out and "⚠ slow" in out
     assert f.slow_waits and f.slow_waits[0][0] == "tap 'Open'"
+
+
+def test_a_flow_can_come_from_stdin(monkeypatch, tmp_path):
+    import io
+
+    from nolook.config import Config
+    from nolook.flow import resolve_flow
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin", io.StringIO('d.note("hi")\n'))
+    p = resolve_flow(Config(root=tmp_path), "-")
+    assert p.read_text() == 'd.note("hi")\n' and p.suffix == ".py"

@@ -487,6 +487,8 @@ class Flow:
 
 
 def resolve_flow(cfg: Config, name: str) -> Path:
+    if name == "-":
+        return _stdin_flow()
     p = Path(name)
     if p.suffix == ".py" and p.is_file():
         return p
@@ -494,6 +496,24 @@ def resolve_flow(cfg: Config, name: str) -> Path:
     if cand.is_file():
         return cand
     raise NolookError(f"no flow {name!r} (looked for {p} and {cand}); `nolook flows` lists them")
+
+
+def _stdin_flow() -> Path:
+    # A one-off flow piped in (`nolook run - <<'EOF'`). Kept as a file so a
+    # failing line can be quoted, and so it can be rerun or saved.
+    import os
+
+    src = sys.stdin.read()
+    if not src.strip():
+        raise NolookError("no flow on stdin")
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "nolook" / "stdin-flows"
+    base.mkdir(parents=True, exist_ok=True)
+    files = sorted(base.glob("*.py"))
+    for old in files[:-20]:
+        old.unlink(missing_ok=True)
+    p = base / f"{time.strftime('%H%M%S')}-{os.getpid()}.py"
+    p.write_text(src)
+    return p
 
 
 def list_flows(cfg: Config) -> None:

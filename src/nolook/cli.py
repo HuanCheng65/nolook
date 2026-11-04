@@ -133,7 +133,7 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("--level", choices=list("VDIWEF"), help="minimum level")
 
     s = sub.add_parser("run", help="run a Python flow; see `nolook flows`")
-    s.add_argument("flow", help="a .py path, or a name in the project's flows dir")
+    s.add_argument("flow", help="a .py path, a name in the project's flows dir, or - to read it from stdin")
     s.add_argument("args", nargs=argparse.REMAINDER)
 
     sub.add_parser("flows", help="list the project's flows")
