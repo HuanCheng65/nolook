@@ -1,12 +1,23 @@
-# nolook
+<h1 align="center">nolook</h1>
 
-让编程 agent 通过控件树而不是截图来操作 Android 应用和网页。
+<h3 align="center">All of the screen. None of the pixels.</h3>
 
-[English](README.md)
+<p align="center">为编程 agent 设计的界面自动化工具，支持 Android 应用和网页。</p>
 
-agent 在设备上调试应用时，通常是这样一个循环：截图、读图、估出按钮坐标、点击、再截图。每张截图都会留在对话里，并随之后的每一次请求重新发送，所以步骤越多，会话越慢、越贵；估出来的坐标也可能点错地方。
+<p align="center">
+  <a href="https://pypi.org/project/nolook/"><img alt="PyPI" src="https://img.shields.io/pypi/v/nolook?color=2b2b2b"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-2b2b2b">
+  <a href="https://github.com/HuanCheng65/nolook/blob/main/README.zh-CN.md#claude-code"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-2b2b2b"></a>
+  <a href="https://github.com/HuanCheng65/nolook/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2b2b2b"></a>
+</p>
 
-nolook 把屏幕内容变成一份简短的文本列表交给 agent。它按元素的文字或 id 点击，每次操作后报告界面发生了哪些变化，可以一次调用执行多个步骤，只有在需要判断视觉效果时才截取一小块图片。同样的命令也能通过 DevTools 协议操作 Chromium 中的网页。
+<p align="center">
+  <a href="https://github.com/HuanCheng65/nolook/blob/main/README.md">English</a> · 中文
+</p>
+
+agent 检查应用时，通常是这样一个循环：截图、读图、点击、再截图。一张整屏截图约 1,500 token，并在之后的整个会话中一直占用上下文窗口。到第二十步时，对话里已经积累了几万 token 不再需要的图片。
+
+nolook 把屏幕变成几行文本交给 agent，之后的每条输出也同样简短：点击后只报告变化，整个流程只返回一行结果，动画只给一页数字。只有需要判断视觉效果时才截图，而且只截一小块，agent 确有需要时才读取。
 
 ```
 $ nolook snap
@@ -28,26 +39,31 @@ screen changed (6 elements):
 …
 ```
 
-## 功能
+<sub>一张 1080×2400 的截图按 Claude 默认图片尺寸缩放为 706×1568，按 宽 × 高 / 750 计算约 1,476 token。上面这次 `snap` 不到 200 token。</sub>
 
-- **以文本读取屏幕。** `snap` 列出可交互的元素和文字，每个元素一行，附带一个简短的引用（`@e4`）。列表中的一行会合并为一行显示。被浮动栏遮住的元素标记为 `[covered]`。
-- **按查询操作，并防止误操作。** `tap 购物清单`、`tap #fab_new`、`tap @e4`。查询必须恰好匹配一个元素；已经离开屏幕的引用会报错，而不会点到原位置上的其他元素。被遮住的元素，以及看起来是写操作的按钮（点赞、关注、发送、删除等），除非明确要求，否则拒绝点击。
-- **报告变化。** 每次操作后等待界面稳定，打印新出现和消失的元素，agent 通常无需再次查看屏幕。
-- **执行流程（flow）。** 把多个步骤写成一个简短的 Python 文件，可以包含条件和循环，一次调用执行完毕。常用的流程保存在项目中，可按名称调用。
-- **按需截取小图。** 只截取某个元素所在的区域，保存为小尺寸 JPEG 文件，nolook 只打印文件路径和预估的 token 数，agent 确有需要时才读取。
-- **测量动画。** 录制操作前后的屏幕，报告动画时长、达到 50% 和 90% 的时间、进度曲线的形状、过冲和卡顿，并附一张关键帧拼图。
-- **测量性能。** 反复滑动时的帧耗时（gfxinfo）、切换编译模式、把 Perfetto trace 汇总为一页文字、查看 ANR 堆栈。
-- **也能操作网页。** `nolook web start` 让一个无头 Chromium 在命令之间保持运行，页面、滚动位置和登录状态都会保留；加 `--web`（或在配置里写 `[web]` 表）后，所有命令都作用于它。也可以连接你自己用 `--remote-debugging-port` 启动的 Chrome。
-- **向你展示设备画面**（Claude Code）：对话旁的面板实时显示设备屏幕，框出每次点击命中的元素，并列出每个操作的结果，子 agent 和 flow 的操作也包括在内。画面只发给你的终端，模型不会读到。perf 或 motion 测量期间，面板不会截图。
+## 上下文花在哪里
 
-## 安装
+| agent 想要 | 截图的做法 | nolook |
+|---|---|---|
+| 查看屏幕 | 一张整屏截图 | `snap`：每个元素一行，附带引用 |
+| 知道点击的结果 | 再截一张图 | 只列出新出现和消失的元素 |
+| 走过五个页面 | 五轮对话、五张图 | 一个 flow、一轮对话、一行 JSON |
+| 检查视觉效果 | 一张整屏截图 | 只截取一个元素，保存为文件，只打印路径和预估 token 数 |
+| 判断动画 | 几十帧画面 | 时长、曲线、过冲和卡顿的文字报告，外加一张关键帧拼图 |
+| 排查卡顿 | 原始 trace | 一页 trace 摘要 |
+| 让你看到画面 | 对话里的截图 | 对话旁的面板实时显示屏幕，只给你看（Claude Code） |
 
-要求：Python 3.11 及以上，`adb` 在 `PATH` 中，设备或模拟器已开启 USB 调试。`motion` 需要 `ffmpeg`。首次连接时，nolook 会把 uiautomator2 的测试服务推送到设备上，不会改动你的应用。操作网页时只需要 Chrome 或 Chromium，不需要 adb 和设备。
+同样的命令也能通过 DevTools 协议操作 Chromium 中的网页。
+
+## 开始使用
+
+要求：Python 3.11 及以上，`adb` 在 `PATH` 中，设备或模拟器已开启 USB 调试；`motion` 需要 `ffmpeg`。首次连接时，nolook 会把 uiautomator2 的测试服务推送到设备上，不会改动你的应用。操作网页时只需要 Chrome 或 Chromium，不需要 adb 和设备。
 
 ```sh
 uv tool install nolook          # 或：pipx install nolook
 nolook doctor                   # 检查 adb、设备、ffmpeg 和 Perfetto
-nolook --web doctor             # 检查浏览器、网站和浏览器配置
+nolook snap                     # 查看屏幕内容
+nolook tap "网络和互联网"        # 按文字点击，并打印变化
 ```
 
 ### Claude Code
@@ -57,13 +73,15 @@ nolook --web doctor             # 检查浏览器、网站和浏览器配置
 /plugin install nolook@nolook
 ```
 
-插件包含三部分：`nolook` skill（说明如何用好这个 CLI）、`nolook-driver` agent（执行多步设备操作，只以文字汇报结果），以及 `/device` 面板。
+插件包含 `nolook` skill、`nolook-driver` agent（执行多步设备操作，只以文字汇报结果），以及 `/device` 面板。
 
 ### 其他 agent
 
-任何能执行 shell 命令的 agent 都可以使用这个 CLI。把 [`plugin/skills/nolook/SKILL.md`](plugin/skills/nolook/SKILL.md) 作为说明交给它即可。
+任何能执行 shell 命令的 agent 都可以使用 nolook。把 [`SKILL.md`](https://github.com/HuanCheng65/nolook/blob/main/plugin/skills/nolook/SKILL.md) 作为说明交给它即可。
 
-## 用法
+> **给 agent。** 先运行 `nolook doctor`，按它的提示处理。先用命令探索，路径确定后改用 flow（`nolook run -`）。只有问题在于视觉效果时才读取截图。点击被拒绝时，提示会说明原因和下一步；只有用户明确要求该操作时才加 `--confirm`。
+
+## 命令
 
 ```sh
 nolook snap                         # 查看屏幕内容
@@ -72,22 +90,11 @@ nolook type "你好" --into "#search"
 nolook scroll down --until "关于手机"
 nolook wait "已保存" --timeout 5
 nolook back
+nolook get @e4                      # 一个元素的全部信息
 nolook shot "#toolbar"              # 截取一小块，打印路径
 nolook run flows/open_note.py       # 一次执行多个步骤
+nolook --help                       # 全部命令
 ```
-
-### 网页
-
-```sh
-nolook web start http://localhost:3000   # 无头运行；--headed 显示窗口
-nolook --web snap
-nolook --web tap 登录
-nolook --web open /settings              # 相对于 [web] 中的 url
-nolook web status                        # 浏览器及其页面
-nolook web stop
-```
-
-等待界面稳定时，也会等操作发出的网络请求完成。`key back` 是浏览器后退。
 
 ### 查询语法
 
@@ -101,6 +108,12 @@ nolook web stop
 | `btn:保存` | 以上任一写法，并限定角色 |
 
 没有匹配时，nolook 列出最接近的元素；匹配到多个时，列出它们，并提示改用引用、角色或 `--nth`。
+
+### 拒绝的操作
+
+- 查询必须恰好匹配一个元素。已经离开屏幕的引用会报错，而不会点到原位置上的其他元素。
+- 被浮动栏遮住的元素（`[covered]`）拒绝点击。
+- 看起来是写操作的按钮（点赞、关注、发送、删除等），除非用 `--confirm` 明确要求，否则拒绝点击。项目可以添加自己的标签，以及每次操作后在 logcat 中检查的规则。
 
 ### 流程
 
@@ -117,6 +130,19 @@ with d.dismissing("给我们评分", tap="以后再说"):
 `nolook run open_note` 每一步打印一行。失败时打印失败的步骤和行号、当时的屏幕内容，以及一张已保存但未读取的截图的路径。
 
 每个操作都会等待目标出现在屏幕上且未被遮挡，因此 flow 中很少需要显式等待。`d(q)` 是一个定位器：每次使用时重新查找元素，并可以把查找范围限定在某个容器内。每个操作都会返回它造成的变化（`.added`、`.removed`、`.shows(q)`），检查直接使用 `assert`，还可以在 flow 中直接测量（`d.frames()`、`with d.measure("x"):`、`d.motion(…)`、`with d.slow(4):`）。
+
+### 网页
+
+```sh
+nolook web start http://localhost:3000   # 无头运行；--headed 显示窗口
+nolook --web snap
+nolook --web tap 登录
+nolook --web open /settings              # 相对于 [web] 中的 url
+nolook web status                        # 浏览器及其页面
+nolook web stop
+```
+
+浏览器在命令之间保持运行，页面、滚动位置和登录状态都会保留。等待界面稳定时，也会等操作发出的网络请求完成。`key back` 是浏览器后退。`nolook web attach` 可以连接你自己用 `--remote-debugging-port` 启动的 Chrome。
 
 ### 动画
 
@@ -162,20 +188,16 @@ package = "com.example.notes"
 flows = "tools/flows"
 guard = ["/api/like", "/api/post"]   # 每次操作后在 logcat 中检查的正则
 danger = ["点赞", "发送", "删除"]      # 不带 --confirm 时拒绝点击的标签
-```
 
-环境变量 `NOLOOK_SERIAL`、`NOLOOK_ADB_PORT`、`NOLOOK_PACKAGE` 优先于配置文件，命令前的 `--serial`、`--package` 也一样：`nolook --package com.example.notes run flow.py`。
-
-对于 Jetpack Compose，请在根部设置 `Modifier.semantics { testTagsAsResourceId = true }`（仅 debug 构建即可），使 `testTag` 显示为 `#id`；并为图标按钮设置 `contentDescription`。网页上，`data-testid` 显示为 `#id`，`aria-label` 为图标按钮命名。
-
-操作网页时，加一个 `[web]` 表（或使用 `--web`）：
-
-```toml
-[web]
+[web]                           # 或使用 --web
 url = "http://localhost:3000"   # launch 打开的地址；open /path 相对于它
 profile = "dev"                 # 浏览器配置：cookie 和登录状态保存在这里
 device = "desk"                 # 窗口大小：desk（1440×900）| phone（390×844）| 宽x高
 ```
+
+环境变量 `NOLOOK_SERIAL`、`NOLOOK_ADB_PORT`、`NOLOOK_PACKAGE` 优先于配置文件，命令前的 `--serial`、`--package` 也一样：`nolook --package com.example.notes run flow.py`。
+
+**让应用可读。** 对于 Jetpack Compose，请在根部设置 `Modifier.semantics { testTagsAsResourceId = true }`（仅 debug 构建即可），使 `testTag` 显示为 `#id`；并为图标按钮设置 `contentDescription`。网页上，`data-testid` 显示为 `#id`，`aria-label` 为图标按钮命名。
 
 ## 局限
 
@@ -188,13 +210,15 @@ device = "desk"                 # 窗口大小：desk（1440×900）| phone（39
 
 ## 与其他方案的比较
 
-- **adb `screencap` + `input tap`**：agent 默认采用的方式，也就是 nolook 要替代的截图循环。
-- **Maestro**：用 YAML 编写 UI 测试流程，成熟且快速。nolook 的流程是 Python，可以写条件和循环；输出面向 agent 的上下文设计：引用、变化、带下一步建议的拒绝信息。
-- **Appium / uiautomator2 的 MCP 服务**：每个操作一次工具调用，返回原始结果。nolook 是 CLI，输出简短且稳定，长会话的上下文因此更小。
-- **playwright-cli、agent-browser**：在浏览器上采用了同样以文本为先的思路。nolook 用同一套命令和 flow 同时操作 Android 应用和对应的网页。
+| 方案 | 用途 | nolook 的不同 |
+|---|---|---|
+| adb `screencap` + `input tap` | agent 默认采用的方式 | 正是 nolook 要替代的截图循环 |
+| Maestro | 用 YAML 编写 UI 测试流程，成熟且快速 | flow 是 Python，可以写条件和循环；输出面向 agent 的上下文：引用、变化、带下一步建议的拒绝信息 |
+| Appium / uiautomator2 的 MCP 服务 | 每个操作一次工具调用，返回原始结果 | CLI 输出简短且稳定，长会话的上下文因此更小 |
+| playwright-cli、agent-browser | 在浏览器上采用同样以文本为先的思路 | 同一套命令和 flow 同时操作 Android 应用和对应的网页 |
 
 nolook 通过 [uiautomator2](https://github.com/openatx/uiautomator2) 操作 Android，通过 Chrome DevTools 协议操作网页。
 
 ## 许可证
 
-MIT
+[MIT](https://github.com/HuanCheng65/nolook/blob/main/LICENSE)

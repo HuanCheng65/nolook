@@ -1,20 +1,31 @@
-# nolook
+<h1 align="center">nolook</h1>
 
-Drive Android apps and web pages from a coding agent by reading the UI tree, not screenshots.
+<h3 align="center">All of the screen. None of the pixels.</h3>
 
-[中文说明](README.zh-CN.md)
+<p align="center">UI automation for coding agents, on Android and the web.</p>
 
-An agent that debugs an app on a device usually works in a loop: take a
-screenshot, read it, guess the coordinates of a button, tap, take another
-screenshot. Every one of those images stays in the conversation and is sent
-again with every later request, so the session gets slower and more
-expensive with each step, and a guessed coordinate can tap the wrong thing.
+<p align="center">
+  <a href="https://pypi.org/project/nolook/"><img alt="PyPI" src="https://img.shields.io/pypi/v/nolook?color=2b2b2b"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-2b2b2b">
+  <a href="https://github.com/HuanCheng65/nolook#claude-code"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-2b2b2b"></a>
+  <a href="https://github.com/HuanCheng65/nolook/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2b2b2b"></a>
+</p>
 
-nolook gives the agent the screen as a short text list instead. It taps by
-what an element says or its id, reports what changed after each action, runs
-several steps in one call, and takes small cropped screenshots only when the
-question is how something looks. The same commands drive a page in Chromium
-over the DevTools protocol.
+<p align="center">
+  English · <a href="https://github.com/HuanCheng65/nolook/blob/main/README.zh-CN.md">中文</a>
+</p>
+
+An agent that checks an app usually works in a loop: take a screenshot,
+read it, tap, take another. Each full screenshot costs about 1,500 tokens
+and stays in the context window for the rest of the session. Twenty steps
+in, tens of thousands of tokens of the window hold pictures the agent no
+longer needs.
+
+nolook shows the agent the screen as a few lines of text, and keeps every
+later output just as small: what changed after a tap, one line of result for
+a whole flow, a page of numbers for an animation. It takes a screenshot only
+when the question is how something looks, and then only a crop, which the
+agent reads only if it must.
 
 ```
 $ nolook snap
@@ -36,49 +47,36 @@ screen changed (6 elements):
 …
 ```
 
-## What it does
+<sub>A 1080×2400 screenshot at Claude's default image size is scaled to
+706×1568; at width × height / 750 that is about 1,476 tokens. The `snap`
+above is under 200.</sub>
 
-- **Reads the screen as text.** `snap` lists interactive elements and text,
-  one line each, with a short ref (`@e4`). List rows read as one line.
-  Elements under a floating bar are marked `[covered]`.
-- **Acts by query, safely.** `tap Groceries`, `tap #fab_new`, `tap @e4`.
-  A query must match exactly one element; a ref that left the screen is an
-  error, never a tap on whatever is there now. Taps on covered elements and
-  on labels that look like write actions (like, follow, send, delete …) are
-  refused unless asked for explicitly.
-- **Reports what changed.** Every action waits for the screen to settle and
-  prints the elements that appeared and disappeared, so the agent rarely
-  needs to look again.
-- **Runs flows.** Several steps with branches and loops, as a short Python
-  file, in one call. Flows worth keeping live in the project and run by name.
-- **Takes small screenshots on request.** A crop to one element, as a small
-  JPEG, saved to a file; nolook prints the path and an estimate of its token
-  cost, and the agent reads it only if it has to.
-- **Measures animations.** It records the screen around a tap and reports
-  duration, the 50% and 90% points, the shape of the progress curve,
-  overshoot and stalls, with one sheet of key frames.
-- **Measures performance.** Frame timing over repeated flings (gfxinfo),
-  compile modes, Perfetto traces read into a one-page summary, ANR stacks.
-- **Drives web pages too.** `nolook web start` keeps a headless Chromium
-  running between commands, so a page, its scroll position and its sign-in
-  stay put; `--web` (or a `[web]` table) points every command at it. Or
-  attach to a Chrome you started with `--remote-debugging-port`.
-- **Shows you the device** (Claude Code): a pane beside the chat with a
-  live mirror of the screen, the element each tap hit outlined, and what
-  every action did, a subagent's and a flow's included. You see it; the
-  model does not. It stays off the device while perf or motion measures.
+## Where the context goes
 
-## Install
+| The agent wants to | The screenshot way | nolook |
+|---|---|---|
+| See the screen | a full screenshot | `snap`: one line per element, with a ref |
+| Know what a tap did | another screenshot | only the elements that appeared and disappeared |
+| Walk through five screens | five turns, five images | one flow, one turn, one line of JSON |
+| Check how something looks | a full screenshot | a crop of one element, saved to a file; only its path and token cost are printed |
+| Judge an animation | dozens of frames | duration, curve, overshoot and stalls as text, plus one sheet of key frames |
+| Find jank | a raw trace | a one-page summary of the trace |
+| Let you watch | screenshots in the chat | a live mirror in a pane beside the chat, for you only (Claude Code) |
+
+The same commands drive a page in Chromium over the DevTools protocol.
+
+## Get started
 
 Requirements: Python 3.11+, `adb` on `PATH`, a device or emulator with USB
-debugging. `ffmpeg` for `motion`. On first connect nolook pushes
+debugging, and `ffmpeg` for `motion`. On first connect nolook pushes
 uiautomator2's test server to the device; nothing is installed in your app.
-For web pages: Chrome or Chromium instead of adb and a device.
+For web pages, Chrome or Chromium instead of adb and a device.
 
 ```sh
 uv tool install nolook          # or: pipx install nolook
 nolook doctor                   # checks adb, the device, ffmpeg, Perfetto
-nolook --web doctor             # checks the browser, the site, the profile
+nolook snap                     # what is on screen
+nolook tap "Network & internet" # tap by text; prints what changed
 ```
 
 ### Claude Code
@@ -88,17 +86,22 @@ nolook --web doctor             # checks the browser, the site, the profile
 /plugin install nolook@nolook
 ```
 
-The plugin adds the `nolook` skill (how to use the CLI well), a
-`nolook-driver` agent for multi-step device work that reports back in text,
-and the `/device` pane.
+The plugin adds the `nolook` skill, a `nolook-driver` agent for multi-step
+device work that reports back in text, and the `/device` pane.
 
 ### Other agents
 
-Any agent that can run shell commands can use the CLI. Give it
-[`plugin/skills/nolook/SKILL.md`](plugin/skills/nolook/SKILL.md) as
-instructions.
+Any agent that can run shell commands can use nolook. Give it
+[`SKILL.md`](https://github.com/HuanCheng65/nolook/blob/main/plugin/skills/nolook/SKILL.md)
+as instructions.
 
-## Usage
+> **For agents.** Run `nolook doctor` first and follow what it says. Use
+> commands to find your way, and switch to a flow (`nolook run -`) once you
+> know the path. Read a screenshot only when the question is how something
+> looks. When a tap is refused, the message says why and what to do next;
+> pass `--confirm` only when the user asked for that action.
+
+## Commands
 
 ```sh
 nolook snap                         # what is on screen
@@ -107,23 +110,11 @@ nolook type "hello" --into "#search"
 nolook scroll down --until "About phone"
 nolook wait "Saved" --timeout 5
 nolook back
+nolook get @e4                      # everything about one element
 nolook shot "#toolbar"              # small crop; prints its path
 nolook run flows/open_note.py       # several steps in one call
+nolook --help                       # every command
 ```
-
-### Web pages
-
-```sh
-nolook web start http://localhost:3000   # headless; --headed shows the window
-nolook --web snap
-nolook --web tap "Sign in"
-nolook --web open /settings              # relative to the url in [web]
-nolook web status                        # the browser and its pages
-nolook web stop
-```
-
-Settling waits for the requests an action started as well as for the page
-to stop changing. `key back` is history back.
 
 ### Queries
 
@@ -138,6 +129,15 @@ to stop changing. `key back` is history back.
 
 A query that matches nothing lists the closest elements; one that matches
 several lists them and asks for a ref, a role or `--nth`.
+
+### Refusals
+
+- A query must match exactly one element. A ref that has left the screen is
+  an error, never a tap on whatever is there now.
+- A tap on an element under a floating bar (`[covered]`) is refused.
+- A tap on a label that looks like a write action (like, follow, send,
+  delete …) is refused unless asked for with `--confirm`. Projects add their
+  own labels, and logcat patterns to flag after each action.
 
 ### Flows
 
@@ -161,6 +161,23 @@ again each time and can scope a search to a container. Every action returns
 what it changed (`.added`, `.removed`, `.shows(q)`), checks are plain
 `assert`, and flows can measure in place (`d.frames()`,
 `with d.measure("x"):`, `d.motion(…)`, `with d.slow(4):`).
+
+### Web pages
+
+```sh
+nolook web start http://localhost:3000   # headless; --headed shows the window
+nolook --web snap
+nolook --web tap "Sign in"
+nolook --web open /settings              # relative to the url in [web]
+nolook web status                        # the browser and its pages
+nolook web stop
+```
+
+The browser keeps running between commands, so a page, its scroll position
+and its sign-in stay put. Settling waits for the requests an action started
+as well as for the page to stop changing. `key back` is history back.
+`nolook web attach` drives a Chrome you started with
+`--remote-debugging-port`.
 
 ### Animations
 
@@ -212,24 +229,22 @@ package = "com.example.notes"
 flows = "tools/flows"
 guard = ["/api/like", "/api/post"]   # logcat regexes flagged after each action
 danger = ["Like", "Send", "Delete"]  # tap refuses these labels without --confirm
-```
 
-`NOLOOK_SERIAL`, `NOLOOK_ADB_PORT` and `NOLOOK_PACKAGE` override it, and so do
-`--serial` and `--package` before the command: `nolook --package com.example.notes run flow.py`.
-
-For Jetpack Compose, set `Modifier.semantics { testTagsAsResourceId = true }`
-near the root (debug builds are enough) so `testTag`s appear as `#ids`, and
-give icon buttons a `contentDescription`. On the web a `data-testid` shows up
-as `#id`, and an `aria-label` names an icon button.
-
-For web pages, add a `[web]` table (or pass `--web`):
-
-```toml
-[web]
+[web]                           # or pass --web
 url = "http://localhost:3000"   # what launch opens; open /path is relative to it
 profile = "dev"                 # browser profile: cookies and sign-in live here
 device = "desk"                 # window size: desk (1440×900) | phone (390×844) | WxH
 ```
+
+`NOLOOK_SERIAL`, `NOLOOK_ADB_PORT` and `NOLOOK_PACKAGE` override it, and so
+do `--serial` and `--package` before the command:
+`nolook --package com.example.notes run flow.py`.
+
+**Make your app readable.** For Jetpack Compose, set
+`Modifier.semantics { testTagsAsResourceId = true }` near the root (debug
+builds are enough) so `testTag`s appear as `#ids`, and give icon buttons a
+`contentDescription`. On the web a `data-testid` shows up as `#id`, and an
+`aria-label` names an icon button.
 
 ## Limits
 
@@ -251,21 +266,17 @@ device = "desk"                 # window size: desk (1440×900) | phone (390×84
 
 ## Compared with
 
-- **adb `screencap` + `input tap`**: what agents fall back to; the
-  screenshot loop this replaces.
-- **Maestro**: YAML flows for UI tests, mature and fast. nolook's flows are
-  Python (branches, loops), and its output is written for an agent's
-  context: refs, deltas, refusals with next steps.
-- **Appium / uiautomator2 MCP servers**: one tool call per action, raw
-  results. nolook is a CLI with short, deterministic output, which keeps
-  long sessions small.
-- **playwright-cli, agent-browser**: the same text-first approach for
-  browsers. nolook uses one set of commands and flows for both an Android
-  app and its web counterpart.
+| Tool | Built for | Where nolook differs |
+|---|---|---|
+| adb `screencap` + `input tap` | what agents fall back to | the screenshot loop this replaces |
+| Maestro | UI tests as YAML flows, mature and fast | flows are Python (branches, loops); output is written for an agent's context: refs, deltas, refusals with next steps |
+| Appium / uiautomator2 MCP servers | one tool call per action, raw results | a CLI with short, deterministic output, which keeps long sessions small |
+| playwright-cli, agent-browser | the same text-first approach, for browsers | one set of commands and flows for an Android app and its web counterpart |
 
-nolook drives Android through [uiautomator2](https://github.com/openatx/uiautomator2)
-and web pages through the Chrome DevTools protocol.
+nolook drives Android through
+[uiautomator2](https://github.com/openatx/uiautomator2) and web pages through
+the Chrome DevTools protocol.
 
 ## License
 
-MIT
+[MIT](https://github.com/HuanCheng65/nolook/blob/main/LICENSE)
