@@ -4,6 +4,37 @@ All notable changes, grouped by kind. Generated from commit messages by
 [git-cliff](https://git-cliff.org).
 
 
+## [0.5.0](https://github.com/HuanCheng65/nolook/releases/tag/v0.5.0) — 2026-11-05
+
+### Features
+
+- Judge gpu_p90 too, and call a 3-run separation likely ([f4377bc](https://github.com/HuanCheng65/nolook/commit/f4377bcf4dd4a08f6a8404b82287b6451d7bc618))
+- Fling one warm-up run before perf frames keeps any ([5720f48](https://github.com/HuanCheng65/nolook/commit/5720f485caefbe4d7f6b52706816e7b4ea18bb81))
+- Measure A and B in turns, and warn when the later one ran hotter ([4ddbca3](https://github.com/HuanCheng65/nolook/commit/4ddbca302ed701a4ce98b40fe8a1a099555c9077))
+- Journal each action, and mark measurements busy ([7ff06ca](https://github.com/HuanCheng65/nolook/commit/7ff06ca2882610cc3336a4cb59e398906be89df3))
+- Stream the screen and the action journal for the pane ([a6603e3](https://github.com/HuanCheng65/nolook/commit/a6603e3560e795a8c9a64476773d4fae19450e3a))
+- Redraw the device pane as a live mirror beside what nolook did ([9d71d37](https://github.com/HuanCheng65/nolook/commit/9d71d37e7f819ad7c2af95682a59226f5e0344ef))
+- Name the app with --package, and press enter after typing in flows ([915ab7f](https://github.com/HuanCheng65/nolook/commit/915ab7f4592b613b641a6e9b9f6e34de49deb65f))
+- Drive web pages with the same verbs as a device ([c0ff3d9](https://github.com/HuanCheng65/nolook/commit/c0ff3d954ab609a9df78e474bfa2664c96caddd1))
+- Run a flow piped in on stdin ([8ce6a2f](https://github.com/HuanCheng65/nolook/commit/8ce6a2ff28c1e260be6331af7088e4159b2d73c0))
+- Scope web queries to containers with an id ([342d223](https://github.com/HuanCheng65/nolook/commit/342d223a93226b6215ca70efe2c4b513ec28784c))
+- Check the browser side in doctor when driving the web ([9f9398e](https://github.com/HuanCheng65/nolook/commit/9f9398e29c918624418563bcb6a9476bd0ca84f8))
+
+### Fixes
+
+- See the lock screen where only KeyguardController reports it ([bd0f8d2](https://github.com/HuanCheng65/nolook/commit/bd0f8d2e4f42ed5a210e5b71274f49abe81d83dc))
+
+### Documentation
+
+- Design a web backend that drives pages over CDP ([7e219e9](https://github.com/HuanCheng65/nolook/commit/7e219e9bf9c6a6527fa5626111dced25bb3a99b4))
+- Rewrite the skill around when to switch from commands to flows ([73f36bc](https://github.com/HuanCheng65/nolook/commit/73f36bcd54002662811794846939211076573c28))
+- Describe driving web pages in the README and the package metadata ([8e92da1](https://github.com/HuanCheng65/nolook/commit/8e92da10ffe891faff307dcd54597ea6f078358f))
+
+### Refactoring
+
+- Move the Android driver behind a Backend ([862be5a](https://github.com/HuanCheng65/nolook/commit/862be5aead04d8b4a3747c65fd600f6776ab1d0f))
+- Reach adb in perf and motion through an explicit Android backend ([22b957e](https://github.com/HuanCheng65/nolook/commit/22b957edfa84b1de67b57a6438daa6c41b752aaa))
+
 ## [0.4.0](https://github.com/HuanCheng65/nolook/releases/tag/v0.4.0) — 2026-11-03
 
 ### Features
