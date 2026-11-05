@@ -137,7 +137,7 @@ def build() -> argparse.ArgumentParser:
     s.add_argument("args", nargs=argparse.REMAINDER)
 
     sub.add_parser("flows", help="list the project's flows")
-    sub.add_parser("doctor", help="check adb, the device, ffmpeg and Perfetto, and say what to fix")
+    sub.add_parser("doctor", help="check adb, the device, ffmpeg and Perfetto (with --web: the browser and the site), and say what to fix")
 
     s = sub.add_parser("trace", help="summarise a Perfetto trace (no device needed)")
     ts = s.add_subparsers(dest="trace_cmd", required=True)

@@ -1,4 +1,7 @@
-"""`nolook doctor`: check what nolook needs, and say how to fix what is missing."""
+"""`nolook doctor`: check what nolook needs, and say how to fix what is missing.
+
+With the web backend it checks the browser side instead of adb and the device.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,8 @@ import os
 import shutil
 import socket
 import time
+import urllib.error
+import urllib.request
 
 from .config import Config
 
@@ -26,6 +31,11 @@ def run(cfg: Config) -> int:
         line(OK, f"config: {cfg_file}")
     else:
         line(WARN, "config: no .nolook.toml here or above", "optional; add one to pick the device, app and flows directory")
+
+    if cfg.web is not None:
+        _web(cfg, line)
+        print("all good" if not failed else f"{failed} problem(s) to fix")
+        return 1 if failed else 0
 
     adb = shutil.which("adb")
     if adb:
@@ -92,3 +102,51 @@ def run(cfg: Config) -> int:
 
     print("all good" if not failed else f"{failed} problem(s) to fix")
     return 1 if failed else 0
+
+
+def _web(cfg: Config, line) -> None:
+    """The web backend: its library, a browser, the site, and the browser for this profile."""
+    from . import web
+
+    if importlib.util.find_spec("websockets"):
+        line(OK, "websockets: installed")
+    else:
+        # An editable install keeps the dependencies it was installed with
+        line(FAIL, "websockets: not installed", "reinstall nolook (uv tool install --reinstall nolook) or pip install websockets")
+        return
+
+    try:
+        line(OK, f"browser: {web.find_browser(cfg)}")
+    except Exception as e:  # noqa: BLE001
+        line(FAIL, f"browser: {e}")
+
+    url = web.web_settings(cfg).get("url")
+    if url:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as r:
+                line(OK, f"site {url}: answers ({r.status})")
+        except urllib.error.HTTPError as e:
+            # It answers; what a page returns is the site's business
+            line(OK, f"site {url}: answers ({e.code})")
+        except Exception as e:  # noqa: BLE001
+            line(FAIL, f"site {url}: not answering ({getattr(e, 'reason', None) or type(e).__name__})", "start the dev server, or fix url in [web]")
+    else:
+        line(WARN, "site: no url in [web]", "optional; set url in .nolook.toml so relative opens and `nolook web start` know the site")
+
+    name = web.profile_name(cfg)
+    ep = web.read_endpoint(name)
+    if not ep or not web._alive(ep["http"]):
+        line(WARN, f"browser for profile {name}: not running", "nolook web start (or nolook web attach <url>)")
+        return
+    try:
+        from .device import Device
+
+        t = time.monotonic()
+        d = Device(cfg)
+        connect = time.monotonic() - t
+        t = time.monotonic()
+        ns = d.nodes()
+        dump = time.monotonic() - t
+        line(OK, f"browser for profile {name}: {ep['http']}, connected in {connect:.1f}s, page read in {dump:.2f}s ({len(ns)} elements)")
+    except Exception as e:  # noqa: BLE001
+        line(FAIL, f"browser for profile {name}: {e}", "nolook web stop && nolook web start")
