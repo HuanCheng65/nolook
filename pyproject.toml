@@ -1,12 +1,12 @@
 [project]
 name = "nolook"
 version = "0.4.0"
-description = "Drive an Android device by what is on screen, not by screenshots. Built for coding agents."
+description = "Drive an Android device or a web page by what is on screen, not by screenshots. Built for coding agents."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "HuanCheng65" }]
-keywords = ["android", "adb", "uiautomator", "ai-agents", "claude-code", "testing"]
+keywords = ["android", "adb", "uiautomator", "web", "chrome-devtools", "ai-agents", "claude-code", "testing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

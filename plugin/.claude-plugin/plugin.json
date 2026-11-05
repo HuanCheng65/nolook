@@ -1,7 +1,7 @@
 {
   "name": "nolook",
   "version": "0.4.0",
-  "description": "Drive Android apps through their UI tree instead of screenshots: text snapshots, query taps, Python flows, small crops on demand.",
+  "description": "Drive Android apps and web pages through their UI tree instead of screenshots: text snapshots, query taps, Python flows, small crops on demand.",
   "author": {
     "name": "HuanCheng65"
   },

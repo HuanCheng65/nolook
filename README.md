@@ -1,6 +1,6 @@
 # nolook
 
-Drive Android apps from a coding agent by reading the UI tree, not screenshots.
+Drive Android apps and web pages from a coding agent by reading the UI tree, not screenshots.
 
 [中文说明](README.zh-CN.md)
 
@@ -13,7 +13,8 @@ expensive with each step, and a guessed coordinate can tap the wrong thing.
 nolook gives the agent the screen as a short text list instead. It taps by
 what an element says or its id, reports what changed after each action, runs
 several steps in one call, and takes small cropped screenshots only when the
-question is how something looks.
+question is how something looks. The same commands drive a page in Chromium
+over the DevTools protocol.
 
 ```
 $ nolook snap
@@ -58,6 +59,10 @@ screen changed (6 elements):
   overshoot and stalls, with one sheet of key frames.
 - **Measures performance.** Frame timing over repeated flings (gfxinfo),
   compile modes, Perfetto traces read into a one-page summary, ANR stacks.
+- **Drives web pages too.** `nolook web start` keeps a headless Chromium
+  running between commands, so a page, its scroll position and its sign-in
+  stay put; `--web` (or a `[web]` table) points every command at it. Or
+  attach to a Chrome you started with `--remote-debugging-port`.
 - **Shows you the device** (Claude Code): a pane beside the chat with a
   live mirror of the screen, the element each tap hit outlined, and what
   every action did, a subagent's and a flow's included. You see it; the
@@ -68,10 +73,12 @@ screen changed (6 elements):
 Requirements: Python 3.11+, `adb` on `PATH`, a device or emulator with USB
 debugging. `ffmpeg` for `motion`. On first connect nolook pushes
 uiautomator2's test server to the device; nothing is installed in your app.
+For web pages: Chrome or Chromium instead of adb and a device.
 
 ```sh
 uv tool install nolook          # or: pipx install nolook
 nolook doctor                   # checks adb, the device, ffmpeg, Perfetto
+nolook --web doctor             # checks the browser, the site, the profile
 ```
 
 ### Claude Code
@@ -104,12 +111,26 @@ nolook shot "#toolbar"              # small crop; prints its path
 nolook run flows/open_note.py       # several steps in one call
 ```
 
+### Web pages
+
+```sh
+nolook web start http://localhost:3000   # headless; --headed shows the window
+nolook --web snap
+nolook --web tap "Sign in"
+nolook --web open /settings              # relative to the url in [web]
+nolook web status                        # the browser and its pages
+nolook web stop
+```
+
+Settling waits for the requests an action started as well as for the page
+to stop changing. `key back` is history back.
+
 ### Queries
 
 | Query | Matches |
 |---|---|
 | `@e12` | a ref from the last output |
-| `#title` | resource id or Compose test tag |
+| `#title` | resource id or Compose test tag; on the web `data-testid`, else `id` |
 | `Save` | text, content description, or one part of a row's label, exactly |
 | `~Sav` | label contains |
 | `/^Item \d+$/` | label matches a regex |
@@ -198,7 +219,17 @@ danger = ["Like", "Send", "Delete"]  # tap refuses these labels without --confir
 
 For Jetpack Compose, set `Modifier.semantics { testTagsAsResourceId = true }`
 near the root (debug builds are enough) so `testTag`s appear as `#ids`, and
-give icon buttons a `contentDescription`.
+give icon buttons a `contentDescription`. On the web a `data-testid` shows up
+as `#id`, and an `aria-label` names an icon button.
+
+For web pages, add a `[web]` table (or pass `--web`):
+
+```toml
+[web]
+url = "http://localhost:3000"   # what launch opens; open /path is relative to it
+profile = "dev"                 # browser profile: cookies and sign-in live here
+device = "desk"                 # window size: desk (1440×900) | phone (390×844) | WxH
+```
 
 ## Limits
 
@@ -210,6 +241,9 @@ give icon buttons a `contentDescription`.
   something moved, not whether it feels right. Compare against a labelled
   run of the version you trust.
 - Frame timings on emulators say little; measure on a real device.
+- On the web, `log`, `motion` and `perf` are not available yet. Sites that
+  show a bot check to a headless browser need `nolook web attach` to a Chrome
+  you started yourself.
 - The pane needs a terminal with the kitty graphics protocol (Ghostty,
   kitty, iTerm2 3.5+). Inside a multiplexer that answers the graphics query
   but reports another name (herdr reports `libghostty`), set
@@ -225,11 +259,12 @@ give icon buttons a `contentDescription`.
 - **Appium / uiautomator2 MCP servers**: one tool call per action, raw
   results. nolook is a CLI with short, deterministic output, which keeps
   long sessions small.
-- **For the web**: [playwright-cli](https://github.com/microsoft/playwright-cli)
-  and [agent-browser](https://agent-browser.dev/) take the same approach for
-  browsers.
+- **playwright-cli, agent-browser**: the same text-first approach for
+  browsers. nolook uses one set of commands and flows for both an Android
+  app and its web counterpart.
 
-nolook is built on [uiautomator2](https://github.com/openatx/uiautomator2).
+nolook drives Android through [uiautomator2](https://github.com/openatx/uiautomator2)
+and web pages through the Chrome DevTools protocol.
 
 ## License
 
